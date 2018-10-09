@@ -9,7 +9,8 @@ import math
 import numpy as np
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 
 class MyDataset(Dataset):
 
@@ -18,6 +19,10 @@ class MyDataset(Dataset):
         self.k = k    
         self.infoList = json.loads(open(str(cfg.PATH.train_dir / 'infoList.json')).read())
         self.load_gallery(phase='train')
+        self.transforms = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
         
     """根据anchor_scale获得5个anchor的宽度和高度
     """
@@ -63,7 +68,7 @@ class MyDataset(Dataset):
         template = self.gallery[label]
 
         clabel, rlabel = self._gtbox_to_label(gtbox)
-        return template, img, clabel, rlabel
+        return self.transforms(template), self.transforms(img), clabel, rlabel
     
     '''数据转换，包括裁剪、变形、转换为tensor、归一化
     '''
@@ -140,6 +145,14 @@ class MyDataset(Dataset):
         area = w * h 
         return area / (sa + sb - area)
 
+def get_dataloader(num_workers=0):
+    transformed_dataset_train = MyDataset()
+    train_dataloader = DataLoader(transformed_dataset_train, batch_size=cfg.TRAIN.batch_size, shuffle=True, num_workers=num_workers)
+    dataloader = {'train':train_dataloader, 'validation':train_dataloader}
+    totsteps = {
+        x: len(transformed_dataset_train)//cfg.TRAIN.batch_size for x in ['train', 'test']
+    }
+    return dataloader, totsteps
 
 if __name__ == '__main__':
     import argparse

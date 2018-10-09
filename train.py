@@ -1,218 +1,266 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jun 27 11:49:42 2018
-@author: ZK
-"""
+import numpy as np
+import time
+import datetime
+from pathlib import Path
+
 import torch
-from torch import nn
-from torch.autograd import Variable as V
-import os
-from axis import SmoothL1Loss
-from axis import Myloss
-#%%
-def train_model(dataloader, model, optimizer, lmbda, scheduler, num_epochs, pth_dir, use_gpu):
-    if not os.path.exists(pth_dir):
-        os.makedirs(pth_dir)
-    dirlist = os.listdir(pth_dir)
-    if (dirlist):
-#        del dirlist[dirlist.index('record.txt')]
-        l = [int(i.split('.')[0].split('_')[-1]) for i in dirlist]
-        former_epoch = max(l)
-        model.load_state_dict(torch.load(pth_dir+'/epoch_'+str(former_epoch)+'.pth'))
-        print('former_epoch %d loaded.' % former_epoch)
-    else:
-        former_epoch = 0
-        print('first train begin.')
-    for epoch in range(former_epoch+1, num_epochs+1):
-            print('-' * 20)
-            print('Epoch {}/{}'.format(epoch, num_epochs))
-
-#        for phase in ['train', 'valid']:
-            phase = 'train'
-            epoch_loss = 0
-            epoch_closs = 0
-            epoch_rloss = 0
-            
-            if phase == 'train':
-                print('-----train-----')
-                if scheduler:
-                    scheduler.step()
-                model.train(True)  # Set model to training mode
-            else:
-                print('-----valid-----')
-                model.train(False)  # Set model to evaluate mode
-
-            phase = 'train'
-            for i, tvdata in enumerate(dataloader[phase]):
-                template, detection, clabel, rlabel, pcc, ratio = tvdata
-                """"""
-#                template, detection, clabel, rlabel, pcc, ratio = template.squeeze(), detection.squeeze(), clabel.squeeze(), rlabel.squeeze(), pcc.squeeze(), ratio.squeeze()
-#                template, detection, clabel, rlabel, pcc, ratio = template.numpy(), detection.numpy(), clabel.numpy(), rlabel.numpy(), pcc.numpy(), ratio.numpy()
-#                import cv2
-#                import numpy as np
-#                import math
-#                from axis import xywh_to_x1y1x2y2
-#                template = np.transpose(template,(1,2,0))
-#                template = cv2.cvtColor(template, cv2.COLOR_RGB2BGR)
-#                cv2.imshow('img', template)
-#                cv2.waitKey(0)
-#
-#                detection = np.transpose(detection,(1,2,0))
-#                detection = cv2.cvtColor(detection, cv2.COLOR_RGB2BGR)
-##                cv2.imshow('img', detection)
-##                cv2.waitKey(0)
-##
-#                a = 64
-#                s = a**2
-#                r = [[3*math.sqrt(s/3.),math.sqrt(s/3.)], [2*math.sqrt(s/2.),math.sqrt(s/2.)], [a,a], [math.sqrt(s/2.),2*math.sqrt(s/2.)], [math.sqrt(s/3.),3*math.sqrt(s/3.)]]
-#                r = [list(map(round, i)) for i in r]
-#                
-#                loc1 = np.where(clabel > 0.5)
-##                img = cv2.imread('./lq/JPEGImages/'+os.listdir('./lq/JPEGImages/')[i])
-#                for where in range(len(loc1[0])):
-#                    loc = [loc1[0][where], loc1[1][where], loc1[2][where]]
-#
-#                    anchor = [7+15*loc[1], 7+15*loc[2]] + r[loc[0]] #根据loc确定anchor
-#                    "根据loc确定对anchor的修正："
-#                    reg = [rlabel[loc[0]*4, loc[1], loc[2]], rlabel[loc[0]*4+1, loc[1], loc[2]], rlabel[loc[0]*4+2, loc[1], loc[2]], rlabel[loc[0]*4+3, loc[1], loc[2]]]
-#                    "根据anchor及reg确定proposals"
-#                    pro = [anchor[0]+reg[0]*anchor[2], anchor[1]+reg[1]*anchor[3], anchor[2]*math.exp(reg[2]), anchor[3]*math.exp(reg[3])]
-##                    pro = anchor
-##                    "把在255X255中的proposals转换成原图的对应位置"
-##                    pro2 = [pro[0]*ratio+pcc[2]-pcc[0], pro[1]*ratio+pcc[3]-pcc[1], pro[2]*ratio, pro[3]*ratio]
-#                    list1 = xywh_to_x1y1x2y2(pro)
-#                    list1 = list(map(lambda x:int(round(x)), list1))
-#                    cv2.rectangle(detection, (list1[0],list1[1]), (list1[2],list1[3]), (0,255,0), 1)
-#                cv2.imshow('img', detection)
-#                cv2.waitKey(0)
-#                detection = Image.fromarray(cv2.cvtColor(detection,cv2.COLOR_BGR2RGB))
-#                detection.save('./tmp/'+str(i)+'.jpg')
-#                cv2.imwrite('./tmp/'+str(i)+'.jpg', detection, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                """"""
-                if use_gpu:
-                    target = torch.zeros(clabel.shape).cuda()+1
-                    template = V(template.cuda())
-                    detection = V(detection.cuda())
-                    clabel = V(clabel.cuda())
-                    rlabel = V(rlabel.cuda())
-                    model = model.cuda()
-                else:
-                    target = torch.zeros(clabel.shape)+1
-                    template = V(template)
-                    detection = V(detection)
-                    clabel = V(clabel)
-                    rlabel = V(rlabel)
-
-                optimizer.zero_grad()
-
-                # forward
-                coutput, routput = model(template, detection)
-#                coutput, routput, clabel, rlabel = coutput.squeeze(), routput.squeeze(), clabel.squeeze(), rlabel.squeeze()
-                coutput, clabel = coutput.squeeze(), clabel.squeeze()
-                coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
-                
-#                routput0 = routput[0].data.numpy()
-#                rlabel0 = rlabel[0].data.numpy()
-                closs = nn.CrossEntropyLoss()(coutput, clabel)
-                
-                rloss = SmoothL1Loss(use_gpu = use_gpu)(clabel, target, routput, rlabel)
-#                rloss = nn.SmoothL1Loss()(routput, rlabel)
-                loss = Myloss()(coutput, clabel, target, routput, rlabel, lmbda)                
-
-#                loss = closs + lmbda * rloss
-                loss2 = torch.add(closs, lmbda, rloss)
-                epoch_loss += loss2.data.item()
-                epoch_closs += closs.data.item()
-                epoch_rloss += rloss.data.item()
-#                epoch_rloss += 0
-                # backward + optimize only if in training
-                if phase == 'train':                    
-                    loss.backward()
-                    optimizer.step()
-                
-                # statistics
-                
-#                top1num, top1acc = accuracy(outputs, labels, 1)
-#                top3num, top3acc = accuracy(outputs, labels, 3)
-                
-#                epoch_top1num += top1num
-#                epoch_top3num += top3num
-                
-                if (phase == 'train'):
-                    if(i+1 == 2 or (i+1) % 100 == 0):
-                        print('batch %d, train loss:%.6f' % (i+1, loss.data.item()))
-#                        duration = time.time() - since
-#                        print('step %d in %.0f seconds. loss: %.6f' % (i+1, duration, loss.data[0]))
-#                        print(' * top1acc:{top1acc:.6f}; top3acc:{top3acc:.6f}'
-#                                  .format(top1acc=top1acc, top3acc=top3acc))
-                    if (i+1 == len(dataloader[phase])):
-                        print('train loss:%.6f' % (epoch_loss/len(dataloader[phase])))
-                        print('closs:%.6f' % (epoch_closs/len(dataloader[phase])))
-                        print('rloss:%.6f' % (epoch_rloss/len(dataloader[phase])))
-#                        with open(RECORD_FILE, 'a') as f:
-#                            f.write('-'*20 + '\nEpoch %d/%d\n' % (epoch,num_epochs))
-#                            f.write('Epoch %d: loss:%.6f; top1acc:%.6f; top3acc:%.6f\n' 
-#                                % (epoch, epoch_loss/len(dataloader), epoch_top1num/len(dataset_train), epoch_top3num/len(dataset_train)))
-#                elif (phase == 'valid'):
-#                    if (i+1 == len(valid_dataloader)):
-#                        print('\nvalid loss:%.6f;\ntop1acc:%.6f; top3acc:%.6f' 
-#                              % (epoch_loss/len(valid_dataloader), epoch_top1num/len(dataset_valid), epoch_top3num/len(dataset_valid)))
-#                        with open(RECORD_FILE, 'a') as f:
-#                            f.write('Epoch %d: loss:%.6f; top1acc:%.6f; top3acc:%.6f\n' 
-#                                % (epoch, epoch_loss/len(valid_dataloader), epoch_top1num/len(dataset_valid), epoch_top3num/len(dataset_valid)))
-                    
-            # deep copy the model
-#        if epoch_acc > best_acc:
-#                best_acc = epoch_acc
-#                best_model_wts = model_conv.state_dict()
-
-            torch.save(model.state_dict(), (pth_dir + 'epoch_%d.pth')% epoch)
-#            print('current model saved to epoch_%d.pth' % epoch)
-    
-#%%
-from SRPN import SiameseRPN
-#from data import dataloader
-from data_otb import dataloader
+import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
-#%%
+from torch.autograd import Variable
+
+from siamrpn.SRPN import SiameseRPN
+from siamrpn.losses import SmoothL1Loss, Myloss
+
+from config import cfg
+from dataset_provider import get_dataloader
+
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='Train a Siam-RPN network')
+    parser.add_argument('--start_epoch', dest='start_epoch',
+                      help='starting epoch',
+                      default=0, type=int)
+    parser.add_argument('--net', dest='net',
+                      default='alexnet', type=str)
+    parser.add_argument('--epochs', dest='max_epochs',
+                      help='number of epochs to train',
+                      default=50, type=int)
+    parser.add_argument('--disp_interval', dest='disp_interval',
+                      help='number of iterations to display',
+                      default=1000, type=int)
+    # parser.add_argument('--checkpoint_interval', dest='checkpoint_interval',
+    #                   help='number of iterations to display',
+    #                   default=10000, type=int)
+    parser.add_argument('--save_dir', dest='save_dir',
+                      help='directory to save models', default="-",
+                      type=str)
+    parser.add_argument('--nw', dest='num_workers',
+                      help='number of worker to load data',
+                      default=4, type=int)                    
+    parser.add_argument('--mGPUs', dest='mGPUs',
+                      help='whether use multiple GPUs',
+                      action='store_true')
+    # parser.add_argument('--bs', dest='batch_size',
+    #                   help='batch_size',
+    #                   default=1, type=int)
+
+    # config optimization
+    parser.add_argument('--o', dest='optimizer',
+                      help='training optimizer',
+                      default="adam", type=str)
+    parser.add_argument('--lr', dest='lr',
+                      help='starting learning rate',
+                      default=0.001, type=float)
+    # parser.add_argument('--lr_decay_step', dest='lr_decay_step',
+    #                   help='step to do learning rate decay, unit is epoch',
+    #                   default=5, type=int)
+    # parser.add_argument('--lr_decay_gamma', dest='lr_decay_gamma',
+    #                   help='learning rate decay ratio',
+    #                   default=0.1, type=float)
+
+    # set training session
+    parser.add_argument('--s', dest='session',
+                      help='training session',
+                      default=0, type=int)
+
+    # resume trained model
+    parser.add_argument('--r', dest='resume',
+                      help='resume checkpoint or not',
+                      default=False, type=bool)
+    parser.add_argument('--f', dest='finetune',
+                      help='finetune or not',
+                      default=False, type=bool)
+    parser.add_argument('--load_name', dest='load_name',
+                      help='path to the loading model',
+                      type=str)
+    parser.add_argument('--checksession', dest='checksession',
+                      help='checksession to load model',
+                      default=0, type=int)
+    parser.add_argument('--checkepoch', dest='checkepoch',
+                      help='checkepoch to load model',
+                      default=0, type=int)
+    parser.add_argument('--checkpoint', dest='checkpoint',
+                      help='checkpoint to load model',
+                      default=0, type=int)
+    # log and diaplay
+    parser.add_argument('--use_tfb', dest='use_tfboard',
+                      help='whether use tensorboard',
+                      action='store_true')
+
+    args = parser.parse_args()
+    return args
+
+
 if __name__ == '__main__':
-    
+    args = parse_args()
+
+    print('Called with args:')
+    print(args)
+
+    # print('Using config:')
+    # pprint.pprint(cfg)
+
+    assert torch.cuda.is_available(), "GPU is in need"
+
+    # ------------------------------- get dataloaders
+    dataloader, totsteps = get_dataloader(args.num_workers)
+
+    #--------------------------------- output_dir setup
+    datasetName = 'flag-{}'.format(cfg.PATH.train_dir.parent.name)
+    output_dir = cfg.PATH.experiment_dir / datasetName
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    #-------------------------------- get model here
     model = SiameseRPN()
-    
+    model = model.cuda()
+
+    fix_layers = [0,3,6]
+    for i in fix_layers:
+        layer = model.features[i]
+        for param in layer.parameters():
+            param.requires_grad = False
+
     params = []
-#    params += list(model.features[0].parameters())
-#    params += list(model.features[3].parameters())
-#    params += list(model.features[6].parameters())
-    params += list(model.features[8].parameters())
-    params += list(model.features[10].parameters())
-    params += list(model.conv1.parameters())
-    params += list(model.conv2.parameters())
-    params += list(model.conv3.parameters())
-    params += list(model.conv4.parameters())
-    
-    optimizer = optim.Adam(params, lr=1e-3, eps=1e-8, weight_decay=0)
-#    optimizer = optim.SGD(params, lr=1e-3)
+    for param in model.parameters():
+        if param.requires_grad:
+            params.append(param)
+    #--------------------------------- optimizer setup
+    lr = args.lr
+    if args.optimizer == 'adam':
+        optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=0)
+    elif args.optimizer == 'sgd':
+        optimizer = optim.SGD(params, momentum=cfg.TRAIN.momentum)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.1)
+
+    #--------------------------------- loading part
+    if args.resume:
+        load_name = output_dir / args.load_name
+        print("loading checkpoint {}".format(load_name))
+        checkpoint = torch.load(load_name)
+        args.session = checkpoint['session']
+        args.start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        lr = optimizer.param_groups[0]['lr']
+        print("loaded checkpoint {}".format(load_name))
+    elif args.finetune:
+        raise NotImplementedError
+    else:
+        pass
+
+    #--------------------------------- logging part
+    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}_{}{}".format(
+            args.net, 
+            'opt', args.optimizer,
+            'lr', args.lr,
+            'ses',args.session,
+        )
+    (output_dir / args.save_dir / 'models').mkdir(exist_ok=True, parents=True)
+    (output_dir / args.save_dir / 'logs').mkdir(exist_ok=True, parents=True)
+    if args.use_tfboard:
+        from tensorboardX import SummaryWriter
+        train_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'train'))
+        # test_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'test'))
+    #--------------------------------- training part
+    if args.mGPUs:
+        model = torch.nn.DataParallel(model)
+
+    for epoch in range(args.start_epoch, args.max_epochs):
+        model.train()
+
+        phase = 'train'
+        logger = train_tb
+
+        epoch_loss = 0
+        epoch_closs = 0
+        epoch_rloss = 0
+
+        epoch_size = 0
+        start = time.time()
+        epoch_start = start
+        for step, data in enumerate(dataloader[phase]):
+            template, detection, clabel, rlabel = data
+            target = torch.zeros(clabel.shape).cuda() + 1
+            template = Variable(template.cuda())
+            detection = Variable(detection.cuda())
+            clabel = Variable(clabel.cuda())
+            rlabel = Variable(rlabel.cuda())
+            dltime = time.time()
+
+            optimizer.zero_grad()
+
+            # forward
+            coutput, routput = model(template, detection)
+
+            coutput, clabel = coutput.squeeze(), clabel.squeeze()
+            coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
+
+            closs = nn.CrossEntropyLoss()(coutput, clabel)
+            rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
+            loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
+
+            if phase == 'train':
+                loss.backward()
+                optimizer.step()
+
+            epoch_loss += loss.item()
+            epoch_closs += closs.item()
+            epoch_rloss += rloss.item()
+
+            epoch_size += 1
+
+            if args.use_tfboard and phase == 'train':
+                info = {
+                    'loss': loss.item(),
+                    'rloss': rloss.item(),
+                    'closs': closs.item(),
+                    'learning_rate': scheduler.get_lr()[0],
+                }
+                for k,v in info.items():
+                    logger.add_scalar(k,v,(epoch*totsteps[phase] + step)*totsteps['train']//totsteps[phase])
+            end = time.time()
+            if step % args.disp_interval == 0:
+                print("{} e:{}/{} step:{} lr:{:.3g} loss:{:.4g} closs:{:.4g} rloss:{:.4g} dload:{:.3g}".format(
+                        phase, epoch,args.max_epochs, step, scheduler.get_lr()[0],
+                        epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
+                        (dltime-start)/(end-start)
+                    ))
+            start = time.time()
+
+        epoch_loss /= epoch_size
+        epoch_closs /= epoch_size
+        epoch_rloss /= epoch_size
+
+        print('Finish {} e:{} loss:{:4g} closs:{:4g} rloss:{:4g} time:{:3g}'.format(
+                phase, epoch, epoch_loss, epoch_closs, epoch_rloss,
+                start - epoch_start
+            ))
+
+        if phase == 'train':
+            save_name = str(output_dir/args.save_dir/'models'/"{}_{}_{}.pth".format(args.session, epoch, step))
+            state = {
+                'session': args.session,
+                'epoch': epoch,
+                'model': model.module.state_dict() if args.mGPUs else model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }
+            torch.save(state, save_name)
+            torch.save(state, 'latest')
+            print('save model: {}'.format(save_name))
+
+        print('-'*20)
+
+    if args.use_tfboard:
+        train_tb.close()
+        test_tb.close()
+
+    from IPython import embed
+    embed()
+
     
-    train_model(
-            dataloader = dataloader
-            ,
-            model = model
-            , 
-            optimizer = optimizer
-            , 
-#            scheduler = scheduler
-            scheduler = None
-            , 
-            lmbda = 1
-            ,
-            num_epochs = 100
-            , 
-            pth_dir = './pth_OTB2015/'
-            ,
-            use_gpu = True
-            )
-#%%
+
+
+
 
 
