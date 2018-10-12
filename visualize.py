@@ -148,12 +148,13 @@ if __name__ == '__main__':
         rlabel = Variable(rlabel.cuda())
 
         # forward
-        coutput, routput = model(template, detection)
+        coutput, routput, ckernal, rkernal, conv1weight, template_features, cinput, detection_features = model(template, detection, debug=True)
 
         coutput, clabel = coutput.squeeze(), clabel.squeeze()
         coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
 
-
+        from IPython import embed
+        embed()
 
 
 
@@ -182,10 +183,6 @@ if __name__ == '__main__':
     print('Finish {} loss:{:4g} closs:{:4g} rloss:{:4g}'.format(
             phase, epoch_loss, epoch_closs, epoch_rloss,
         ))
-
-    if args.use_tfboard:
-        # train_tb.close()
-        test_tb.close()
 
     from IPython import embed
     embed()
