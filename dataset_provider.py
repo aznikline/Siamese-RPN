@@ -61,8 +61,10 @@ class MyDataset(Dataset):
 
         img_path = info['path']
         img = self.load_image(img_path)
+        original_size = img.size
         img = img.resize((cfg.detection_size, cfg.detection_size), Image.BILINEAR)
         bbox = info['bbox']
+        self.resize_bbox(bbox, original_size)
         gtbox = x1y1x2y2_to_xywh(bbox)
 
         label = info['label']
@@ -70,6 +72,12 @@ class MyDataset(Dataset):
 
         clabel, rlabel = self._gtbox_to_label(gtbox)
         return self.transforms(template), self.transforms(img), clabel, rlabel
+
+    def resize_bbox(self, bbox, original_size):
+        bbox[0] *= cfg.detection_size/original_size[0]
+        bbox[2] *= cfg.detection_size/original_size[0]
+        bbox[1] *= cfg.detection_size/original_size[1]
+        bbox[3] *= cfg.detection_size/original_size[1]
     
     '''数据转换，包括裁剪、变形、转换为tensor、归一化
     '''
@@ -156,7 +164,11 @@ def get_dataloader(num_workers=0):
         'train': len(transformed_dataset_train)//cfg.TRAIN.batch_size,
         'test': len(transformed_dataset_test)//cfg.TRAIN.batch_size,
     }
-    return dataloader, totsteps
+    datasets = {
+        'train': transformed_dataset_train,
+        'test': transformed_dataset_test,
+    }
+    return dataloader, totsteps, datasets
 
 if __name__ == '__main__':
     import argparse
