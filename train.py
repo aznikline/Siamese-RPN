@@ -104,7 +104,7 @@ if __name__ == '__main__':
     assert torch.cuda.is_available(), "GPU is in need"
 
     # ------------------------------- get dataloaders
-    dataloader, totsteps = get_dataloader(args.num_workers)
+    dataloader, totsteps, datasets = get_dataloader(args.num_workers)
 
     #--------------------------------- output_dir setup
     datasetName = 'flag-{}'.format(cfg.dataset_name)
@@ -225,7 +225,7 @@ if __name__ == '__main__':
                         'learning_rate': scheduler.get_lr()[0],
                     }
                     for k,v in info.items():
-                        logger.add_scalar(k,v,(epoch*totsteps[phase] + step)*totsteps['train']//totsteps[phase])
+                        logger.add_scalar(k,v,(epoch*min(totsteps[phase], cfg.TEST.max_validation) + step)*totsteps['train']//totsteps[phase])
                 end = time.time()
                 if step % args.disp_interval == 0:
                     print("{} e:{}/{} step:{} lr:{:.3g} loss:{:.4g} closs:{:.4g} rloss:{:.4g} dload:{:.3g}".format(
