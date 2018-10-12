@@ -14,11 +14,12 @@ from torchvision import transforms
 
 class MyDataset(Dataset):
 
-    def __init__(self, anchor_scale = 64, k = 5):
+    def __init__(self, anchor_scale = 64, k = 5, phase='train', dataset_name='64scale_train_dataset'):
         self.anchor_shape = self._get_anchor_shape(anchor_scale)
         self.k = k    
-        self.infoList = json.loads(open(str(cfg.PATH.train_dir / 'infoList.json')).read())
-        self.load_gallery(phase='train')
+        self.path = cfg.PATH.root_dir / 'data' / dataset_name / phase
+        self.infoList = json.loads(open(str(self.path / 'infoList.json')).read())
+        self.load_gallery()
         self.transforms = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -43,8 +44,8 @@ class MyDataset(Dataset):
             img = img.convert('RGB')
         return img
 
-    def load_gallery(self, phase='train'):
-        gallery_dir = cfg.PATH.train_dir/'gallery'
+    def load_gallery(self):
+        gallery_dir = self.path/'gallery'
         gallery = {}
         for path in gallery_dir.glob('*'):
             ind = int(path.name.split('.')[0])
@@ -147,10 +148,13 @@ class MyDataset(Dataset):
 
 def get_dataloader(num_workers=0):
     transformed_dataset_train = MyDataset()
+    transformed_dataset_test = MyDataset(phase='test')
     train_dataloader = DataLoader(transformed_dataset_train, batch_size=cfg.TRAIN.batch_size, shuffle=True, num_workers=num_workers)
-    dataloader = {'train':train_dataloader, 'validation':train_dataloader}
+    test_dataloader = DataLoader(transformed_dataset_test, batch_size=cfg.TRAIN.batch_size, shuffle=True, num_workers=num_workers)
+    dataloader = {'train':train_dataloader, 'validation':train_dataloader, 'test': test_dataloader}
     totsteps = {
-        x: len(transformed_dataset_train)//cfg.TRAIN.batch_size for x in ['train', 'test']
+        'train': len(transformed_dataset_train)//cfg.TRAIN.batch_size,
+        'test': len(transformed_dataset_test)//cfg.TRAIN.batch_size,
     }
     return dataloader, totsteps
 
@@ -164,8 +168,9 @@ if __name__ == '__main__':
     if args.build:
         builder = FlagBuilder(cfg.PATH.root_dir)
         iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
-        builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
-                                    scaleRange=None)
+        # builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
+        #                             scaleRange=None)
+        builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
 
     if args.testds:
         ds = MyDataset()
