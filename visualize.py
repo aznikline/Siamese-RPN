@@ -2,6 +2,8 @@ import numpy as np
 import time
 import datetime
 from pathlib import Path
+import cv2
+import math
 
 import torch
 import torch.nn as nn
@@ -11,6 +13,7 @@ from torch.autograd import Variable
 
 from siamrpn.SRPN import SiameseRPN
 from siamrpn.losses import SmoothL1Loss, Myloss
+from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2
 
 from config import cfg
 from dataset_provider import get_dataloader
@@ -91,6 +94,55 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def imageConvertor(tensor):
+    tmp = tensor[0].detach().cpu().numpy().transpose(1,2,0)
+    tmp = (tmp * (np.array([0.229, 0.224, 0.225]).reshape(1,1,3))+(np.array([0.485, 0.456, 0.406]).reshape(1,1,3))) * 255
+    return tmp.astype(np.uint8)
+
+def getAnchor(a,b,c,anchor_shape):
+    return [7+a*15, 7+b*15, anchor_shape[c][0], anchor_shape[c][1]]
+
+def outputConvertor(coutput, routput, anchor_shape):
+    coutput = coutput.detach().cpu().numpy()
+    routput = routput.detach().cpu().numpy().reshape(5,4,17,17)
+    bboxList = []
+    maxProb = 0
+    for a in range(17):
+        for b in range(17):
+            for c in range(5):
+                anchor = getAnchor(a,b,c,anchor_shape)
+                anchor_x1y1x2y2 = xywh_to_x1y1x2y2(anchor)
+                if anchor_x1y1x2y2[0]>=0 and anchor_x1y1x2y2[1]>=0 and anchor_x1y1x2y2[2]<=255 and anchor_x1y1x2y2[3]<=255:
+                    try:
+                        delta = coutput[c,0,a,b]-coutput[c,1,a,b]
+                        if delta > 10:
+                            prob = 0
+                        elif delta < -10:
+                            prob = 1
+                        else:
+                            prob = 1/(1+math.exp(delta))
+                        maxProb = max(maxProb, prob)
+                    except:
+                        print(coutput[c,0,a,b], coutput[c,1,a,b], c, a, b)
+                        raise OverflowError
+                    if prob >= 0.5:
+                        bbox = [0,0,0,0]
+                        channel0, channel1, channel2, channel3 = routput[c,:,a,b]
+                        bbox[0] = channel0*anchor[2] + anchor[0]
+                        bbox[1] = channel1*anchor[3] + anchor[1]
+                        bbox[2] = math.exp(channel2)*anchor[2]
+                        bbox[3] = math.exp(channel3)*anchor[3]
+                        bbox = xywh_to_x1y1x2y2(bbox)
+                        try:
+                            bbox = np.array(bbox, dtype=np.int32)
+                        except:
+                            print(channel0, channel1, channel2, channel3)
+                            print(bbox)
+                            continue
+                            # raise OverflowError
+                        bboxList.append(bbox)
+    return bboxList, maxProb
+
 if __name__ == '__main__':
     args = parse_args()
 
@@ -131,7 +183,7 @@ if __name__ == '__main__':
     
     #--------------------------------- main part
     model.eval()
-    phase = 'test'
+    phase = 'validation'
 
     epoch = 0
     epoch_loss = 0
@@ -153,29 +205,35 @@ if __name__ == '__main__':
         coutput, clabel = coutput.squeeze(), clabel.squeeze()
         coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
 
+        # for visualization
+        bboxList, maxProb = outputConvertor(coutput, routput, datasets[phase].anchor_shape)
+        img = imageConvertor(detection)
+        # print("img shape:", img.shape)
+
+        print(len(bboxList), maxProb)
+        for bbox in bboxList:
+            img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0,0,255), 2)
+
         from IPython import embed
         embed()
 
+        # closs = nn.CrossEntropyLoss()(coutput, clabel)
+        # rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
+        # loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
 
+        # epoch_loss += loss.item()
+        # epoch_closs += closs.item()
+        # epoch_rloss += rloss.item()
 
+        # epoch_size += 1
 
+        
 
-
-        closs = nn.CrossEntropyLoss()(coutput, clabel)
-        rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
-        loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
-
-        epoch_loss += loss.item()
-        epoch_closs += closs.item()
-        epoch_rloss += rloss.item()
-
-        epoch_size += 1
-
-        if step % args.disp_interval == 0:
-            print("{} step:{} loss:{:.4g} closs:{:.4g} rloss:{:.4g}".format(
-                    phase, step,
-                    epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
-                ))
+        # if step % args.disp_interval == 0:
+        #     print("{} step:{} loss:{:.4g} closs:{:.4g} rloss:{:.4g}".format(
+        #             phase, step,
+        #             epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
+        #         ))
     epoch_loss /= epoch_size
     epoch_closs /= epoch_size
     epoch_rloss /= epoch_size
