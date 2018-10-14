@@ -14,9 +14,10 @@ from torchvision import transforms
 
 class MyDataset(Dataset):
 
-    def __init__(self, anchor_scale = 64, k = 5, phase='train', dataset_name='64scale_train_dataset'):
+    def __init__(self, anchor_scale = 64, k = 5, phase='train', dataset_name=cfg.dataset_name):
         self.anchor_shape = self._get_anchor_shape(anchor_scale)
         self.k = k    
+        self.phase = phase
         self.path = cfg.PATH.root_dir / 'data' / dataset_name / phase
         self.infoList = json.loads(open(str(self.path / 'infoList.json')).read())
         self.load_gallery()
@@ -45,7 +46,10 @@ class MyDataset(Dataset):
         return img
 
     def load_gallery(self):
-        gallery_dir = self.path/'gallery'
+        if self.phase == 'validation':
+            gallery_dir = self.path.parent / 'train' / 'gallery'
+        else:
+            gallery_dir = self.path/'gallery'
         gallery = {}
         for path in gallery_dir.glob('*'):
             ind = int(path.name.split('.')[0])
@@ -70,10 +74,11 @@ class MyDataset(Dataset):
         label = info['label']
         template = self.gallery[label]
 
-        if phase == 'train':
-            clabel, rlabel = self._gtbox_to_label(gtbox)
-        else:
-            clabel, rlabel = self._get_test_label(gtbox)
+        # if self.phase == 'train':
+        #     clabel, rlabel = self._gtbox_to_label(gtbox)
+        # else:
+        #     clabel, rlabel = self._get_test_label(gtbox)
+        clabel, rlabel = self._get_test_label(gtbox)
         return self.transforms(template), self.transforms(img), clabel, rlabel
 
     def resize_bbox(self, bbox, original_size):
@@ -140,7 +145,7 @@ class MyDataset(Dataset):
                         iou = self._IOU(anchor, gtbox)
                         if iou >= cfg.pos_iou_thresh:
                             clabel[c,a,b] = 1
-        return clabel, rlabel
+        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
 
     def _get_64_anchors(self, gtbox):
         pos = {}
@@ -177,18 +182,22 @@ class MyDataset(Dataset):
         area = w * h 
         return area / (sa + sb - area)
 
-def get_dataloader(num_workers=0):
+def get_dataloader(num_workers=0, batch_size=1):
     transformed_dataset_train = MyDataset()
+    transformed_dataset_validation = MyDataset(phase='validation')
     transformed_dataset_test = MyDataset(phase='test')
-    train_dataloader = DataLoader(transformed_dataset_train, batch_size=cfg.TRAIN.batch_size, shuffle=True, num_workers=num_workers)
-    test_dataloader = DataLoader(transformed_dataset_test, batch_size=cfg.TRAIN.batch_size, shuffle=True, num_workers=num_workers)
-    dataloader = {'train':train_dataloader, 'validation':train_dataloader, 'test': test_dataloader}
+    train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    dataloader = {'train':train_dataloader, 'validation':validation_dataloader, 'test': test_dataloader}
     totsteps = {
-        'train': len(transformed_dataset_train)//cfg.TRAIN.batch_size,
-        'test': len(transformed_dataset_test)//cfg.TRAIN.batch_size,
+        'train': len(transformed_dataset_train)//batch_size,
+        'validation': len(transformed_dataset_validation)//batch_size,
+        'test': len(transformed_dataset_test)//batch_size,
     }
     datasets = {
         'train': transformed_dataset_train,
+        'validation': transformed_dataset_validation,
         'test': transformed_dataset_test,
     }
     return dataloader, totsteps, datasets
@@ -205,7 +214,10 @@ if __name__ == '__main__':
         iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
         # builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
         #                             scaleRange=None)
-        builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
+        # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
+        # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
+        builder.build("random_insert", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+                scaleRange=None)
 
     if args.testds:
         ds = MyDataset()

@@ -41,9 +41,9 @@ def parse_args():
     parser.add_argument('--mGPUs', dest='mGPUs',
                       help='whether use multiple GPUs',
                       action='store_true')
-    # parser.add_argument('--bs', dest='batch_size',
-    #                   help='batch_size',
-    #                   default=1, type=int)
+    parser.add_argument('--bs', dest='batch_size',
+                      help='batch_size',
+                      default=1, type=int)
 
     # config optimization
     parser.add_argument('--o', dest='optimizer',
@@ -104,7 +104,7 @@ if __name__ == '__main__':
     assert torch.cuda.is_available(), "GPU is in need"
 
     # ------------------------------- get dataloaders
-    dataloader, totsteps, datasets = get_dataloader(args.num_workers)
+    dataloader, totsteps, datasets = get_dataloader(args.num_workers, args.batch_size)
 
     #--------------------------------- output_dir setup
     datasetName = 'flag-{}'.format(cfg.dataset_name)
@@ -162,20 +162,20 @@ if __name__ == '__main__':
     if args.use_tfboard:
         from tensorboardX import SummaryWriter
         train_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'train'))
-        test_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'test'))
+        val_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'validation'))
     #--------------------------------- training part
     if args.mGPUs:
         model = torch.nn.DataParallel(model)
 
     for epoch in range(args.start_epoch, args.max_epochs):
-        for phase in ['train','test']:
+        for phase in ['train','validation']:
             if phase == 'train':
                 scheduler.step()
                 model.train()
                 logger = train_tb
             else:
                 model.eval()
-                logger = test_tb
+                logger = val_tb
 
             epoch_loss = 0
             epoch_closs = 0
@@ -185,7 +185,7 @@ if __name__ == '__main__':
             start = time.time()
             epoch_start = start
             for step, data in enumerate(dataloader[phase]):
-                if phase == 'test' and step > cfg.TEST.max_validation:
+                if phase == 'validation' and step > cfg.TEST.max_validation:
                     break
                 template, detection, clabel, rlabel = data
                 target = torch.zeros(clabel.shape).cuda() + 1
@@ -260,7 +260,7 @@ if __name__ == '__main__':
 
     if args.use_tfboard:
         train_tb.close()
-        test_tb.close()
+        val_tb.close()
 
     from IPython import embed
     embed()
