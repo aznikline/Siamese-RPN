@@ -15,6 +15,9 @@ __C.template_size = 127
 __C.detection_size = 255
 __C.lmbda = 1
 
+__C.pos_iou_thresh = 0.5
+__C.neg_iou_thresh = 0.2
+
 __C.TRAIN = edict()
 __C.TRAIN.momentum = 0.9
 __C.TRAIN.batch_size=1

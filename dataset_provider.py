@@ -70,7 +70,10 @@ class MyDataset(Dataset):
         label = info['label']
         template = self.gallery[label]
 
-        clabel, rlabel = self._gtbox_to_label(gtbox)
+        if phase == 'train':
+            clabel, rlabel = self._gtbox_to_label(gtbox)
+        else:
+            clabel, rlabel = self._get_test_label(gtbox)
         return self.transforms(template), self.transforms(img), clabel, rlabel
 
     def resize_bbox(self, bbox, original_size):
@@ -119,6 +122,26 @@ class MyDataset(Dataset):
             result = np.concatenate([result, np.array(tmp).reshape([1,4])], axis = 0)
         return result
 
+    def _get_test_label(self, gtbox):
+        clabel = np.zeros([5,17,17])
+        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+        dct = {}
+        for a in range(17):
+            for b in range(17):
+                for c in range(5):
+                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                    channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                    channel2 = math.log(gtbox[2]/anchor[2])
+                    channel3 = math.log(gtbox[3]/anchor[3])
+                    rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+                    anchor = xywh_to_x1y1x2y2(anchor)
+                    if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
+                        iou = self._IOU(anchor, gtbox)
+                        if iou >= cfg.pos_iou_thresh:
+                            clabel[c,a,b] = 1
+        return clabel, rlabel
+
     def _get_64_anchors(self, gtbox):
         pos = {}
         neg = {}
@@ -129,9 +152,9 @@ class MyDataset(Dataset):
                     anchor = xywh_to_x1y1x2y2(anchor)
                     if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
                         iou = self._IOU(anchor, gtbox)
-                        if iou >= 0.5:
+                        if iou >= cfg.pos_iou_thresh:
                             pos['%d,%d,%d' % (a,b,c)] = iou
-                        elif iou <= 0.2:
+                        elif iou <= cfg.neg_iou_thresh:
                             neg['%d,%d,%d' % (a,b,c)] = iou
         pos = sorted(pos.items(),key = lambda x:x[1],reverse = True)
         pos = [list(map(int, i[0].split(','))) for i in pos[:16]]
