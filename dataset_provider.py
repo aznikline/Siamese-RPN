@@ -1,6 +1,6 @@
 from flag.builder import FlagBuilder
 from config import cfg
-from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2
+from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2, clip_anchor
 
 import json
 # import cv2
@@ -78,7 +78,7 @@ class MyDataset(Dataset):
         #     clabel, rlabel = self._gtbox_to_label(gtbox)
         # else:
         #     clabel, rlabel = self._get_test_label(gtbox)
-        clabel, rlabel = self._get_test_label(gtbox)
+        clabel, rlabel = self._get_label(gtbox)
         return self.transforms(template), self.transforms(img), clabel, rlabel
 
     def resize_bbox(self, bbox, original_size):
@@ -98,6 +98,41 @@ class MyDataset(Dataset):
         
     """根据ground truth box构造class label和reg label
     """
+    def _get_label(self, gtbox):
+        clabel = np.zeros([5, 17, 17]) - 100
+        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+        if self.phase == 'train':
+            pos, neg = self._get_64_anchors_new(gtbox)
+            for a,b,c,anchor_x1y1x2y2 in pos:
+                anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
+                clabel[c,a,b] = 1
+                channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                channel2 = math.log(gtbox[2]/anchor[2])
+                channel3 = math.log(gtbox[3]/anchor[3])
+                rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+            for a,b,c,anchor in neg:
+                clabel[c,a,b] = 0
+        else :
+            for a in range(17):
+                for b in range(17):
+                    for c in range(5):
+                        anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                        anchor = xywh_to_x1y1x2y2(anchor)
+                        anchor = clip_anchor(anchor)
+                        iou = self._IOU(anchor, gtbox)
+                        anchor = x1y1x2y2_to_xywh(anchor)
+                        if iou >= cfg.pos_iou_thresh:
+                            clabel[c,a,b] = 1
+                            channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                            channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                            channel2 = math.log(gtbox[2]/anchor[2])
+                            channel3 = math.log(gtbox[3]/anchor[3])
+                            rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+                        elif iou <= cfg.neg_iou_thresh:
+                            clabel[c,a,b] = 0
+        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
+
     def _gtbox_to_label(self, gtbox):
         clabel = np.zeros([5, 17, 17]) - 100
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
@@ -128,7 +163,7 @@ class MyDataset(Dataset):
         return result
 
     def _get_test_label(self, gtbox):
-        clabel = np.zeros([5,17,17])
+        clabel = np.zeros([5,17,17]) - 100
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
         dct = {}
         for a in range(17):
@@ -147,6 +182,27 @@ class MyDataset(Dataset):
                             clabel[c,a,b] = 1
         return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
 
+    def _get_64_anchors_new(self, gtbox):
+        pos = {}
+        neg = {}
+        for a in range(17):
+            for b in range(17):
+                for c in range(5):
+                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    anchor = xywh_to_x1y1x2y2(anchor)
+                    anchor = clip_anchor(anchor)
+                    iou = self._IOU(anchor, gtbox)
+                    if iou >= cfg.pos_iou_thresh:
+                        pos[(a,b,c)] = (iou, anchor)
+                    elif iou <= cfg.neg_iou_thresh:
+                        neg[(a,b,c)] = (iou, anchor)
+        pos = sorted(pos.items(), key=lambda tup: tup[1][0], reverse=True)
+        pos = [(*tup[0], tup[1][1]) for tup in pos[:16]]
+        neg = sorted(neg.items(), key=lambda tup: tup[1][0], reverse=True)
+        neg = [(*tup[0], tup[1][1]) for tup in neg[:64-len(pos)]]
+        return pos, neg
+
+
     def _get_64_anchors(self, gtbox):
         pos = {}
         neg = {}
@@ -157,9 +213,9 @@ class MyDataset(Dataset):
                     anchor = xywh_to_x1y1x2y2(anchor)
                     if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
                         iou = self._IOU(anchor, gtbox)
-                        if iou >= cfg.pos_iou_thresh:
+                        if iou >= cfg.pos_iou_thresh+0.1:
                             pos['%d,%d,%d' % (a,b,c)] = iou
-                        elif iou <= cfg.neg_iou_thresh:
+                        elif iou >= cfg.neg_iou_thresh and iou < cfg.pos_iou_thresh-0.1:
                             neg['%d,%d,%d' % (a,b,c)] = iou
         pos = sorted(pos.items(),key = lambda x:x[1],reverse = True)
         pos = [list(map(int, i[0].split(','))) for i in pos[:16]]
