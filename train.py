@@ -52,12 +52,12 @@ def parse_args():
     parser.add_argument('--lr', dest='lr',
                       help='starting learning rate',
                       default=0.001, type=float)
-    # parser.add_argument('--lr_decay_step', dest='lr_decay_step',
-    #                   help='step to do learning rate decay, unit is epoch',
-    #                   default=5, type=int)
-    # parser.add_argument('--lr_decay_gamma', dest='lr_decay_gamma',
-    #                   help='learning rate decay ratio',
-    #                   default=0.1, type=float)
+    parser.add_argument('--lr_decay_step', dest='lr_decay_step',
+                      help='step to do learning rate decay, unit is epoch',
+                      default=40, type=int)
+    parser.add_argument('--lr_decay_gamma', dest='lr_decay_gamma',
+                      help='learning rate decay ratio',
+                      default=0.1, type=float)
 
     # set training session
     parser.add_argument('--s', dest='session',
@@ -130,8 +130,8 @@ if __name__ == '__main__':
     if args.optimizer == 'adam':
         optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=0)
     elif args.optimizer == 'sgd':
-        optimizer = optim.SGD(params, momentum=cfg.TRAIN.momentum)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.1)
+        optimizer = optim.SGD(params, lr=lr, momentum=cfg.TRAIN.momentum)
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- loading part
     if args.resume:
@@ -151,10 +151,10 @@ if __name__ == '__main__':
         pass
 
     #--------------------------------- logging part
-    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}_{}{}".format(
+    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}".format(
             args.net, 
             'opt', args.optimizer,
-            'lr', args.lr,
+            'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
             'ses',args.session,
         )
     (output_dir / args.save_dir / 'models').mkdir(exist_ok=True, parents=True)
@@ -206,6 +206,7 @@ if __name__ == '__main__':
                 closs = nn.CrossEntropyLoss()(coutput, clabel)
                 rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
                 loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
+                # loss, closs, rloss = Myloss()(coutput, clabel, routput, rlabel, cfg.lmbda)
 
                 if phase == 'train':
                     loss.backward()
