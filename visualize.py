@@ -13,7 +13,7 @@ from torch.autograd import Variable
 
 from siamrpn.SRPN import SiameseRPN
 from siamrpn.losses import SmoothL1Loss, Myloss
-from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2
+from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2, clip_anchor
 
 from config import cfg
 from dataset_provider import get_dataloader
@@ -110,38 +110,69 @@ def outputConvertor(coutput, routput, anchor_shape):
     for a in range(17):
         for b in range(17):
             for c in range(5):
-                anchor = getAnchor(a,b,c,anchor_shape)
+                anchor = [7+15*a, 7+15*b, anchor_shape[c][0], anchor_shape[c][1]]
                 anchor_x1y1x2y2 = xywh_to_x1y1x2y2(anchor)
-                if anchor_x1y1x2y2[0]>=0 and anchor_x1y1x2y2[1]>=0 and anchor_x1y1x2y2[2]<=255 and anchor_x1y1x2y2[3]<=255:
+                anchor_x1y1x2y2 = clip_anchor(anchor_x1y1x2y2)
+                anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
+                delta = coutput[c,0,a,b]-coutput[c,1,a,b]
+                if delta > 10:
+                    prob = 0
+                elif delta < -10:
+                    prob = 1
+                else:
+                    prob = 1/(1+math.exp(delta))
+                maxProb = max(maxProb, prob)
+                if prob >= 0.5:
+                # if coutput[c,1,a,b]>0.2:
+                    bbox = [0,0,0,0]
+                    channel0, channel1, channel2, channel3 = routput[c,:,a,b]
+                    bbox[0] = channel0*anchor[2] + anchor[0]
+                    bbox[1] = channel1*anchor[3] + anchor[1]
+                    bbox[2] = math.exp(channel2)*anchor[2]
+                    bbox[3] = math.exp(channel3)*anchor[3]
+                    bbox = xywh_to_x1y1x2y2(bbox)
                     try:
-                        delta = coutput[c,0,a,b]-coutput[c,1,a,b]
-                        if delta > 10:
-                            prob = 0
-                        elif delta < -10:
-                            prob = 1
-                        else:
-                            prob = 1/(1+math.exp(delta))
-                        maxProb = max(maxProb, prob)
+                        bbox = np.array(bbox, dtype=np.int32)
                     except:
-                        print(coutput[c,0,a,b], coutput[c,1,a,b], c, a, b)
-                        raise OverflowError
-                    if prob >= 0.5:
-                        bbox = [0,0,0,0]
-                        channel0, channel1, channel2, channel3 = routput[c,:,a,b]
-                        bbox[0] = channel0*anchor[2] + anchor[0]
-                        bbox[1] = channel1*anchor[3] + anchor[1]
-                        bbox[2] = math.exp(channel2)*anchor[2]
-                        bbox[3] = math.exp(channel3)*anchor[3]
-                        bbox = xywh_to_x1y1x2y2(bbox)
-                        try:
-                            bbox = np.array(bbox, dtype=np.int32)
-                        except:
-                            print(channel0, channel1, channel2, channel3)
-                            print(bbox)
-                            continue
-                            # raise OverflowError
-                        bboxList.append(bbox)
-    return bboxList, maxProb
+                        print(channel0, channel1, channel2, channel3)
+                        print(bbox)
+                        continue
+                        # raise OverflowError
+                    bboxList.append((bbox, prob))
+
+
+                # if anchor_x1y1x2y2[0]>=0 and anchor_x1y1x2y2[1]>=0 and anchor_x1y1x2y2[2]<=255 and anchor_x1y1x2y2[3]<=255:
+                #     try:
+                #         delta = coutput[c,0,a,b]-coutput[c,1,a,b]
+                #         if delta > 10:
+                #             prob = 0
+                #         elif delta < -10:
+                #             prob = 1
+                #         else:
+                #             prob = 1/(1+math.exp(delta))
+                #         maxProb = max(maxProb, prob)
+                #     except:
+                #         print(coutput[c,0,a,b], coutput[c,1,a,b], c, a, b)
+                #         raise OverflowError
+                    # if prob >= 0.5:
+                    #     bbox = [0,0,0,0]
+                    #     channel0, channel1, channel2, channel3 = routput[c,:,a,b]
+                    #     bbox[0] = channel0*anchor[2] + anchor[0]
+                    #     bbox[1] = channel1*anchor[3] + anchor[1]
+                    #     bbox[2] = math.exp(channel2)*anchor[2]
+                    #     bbox[3] = math.exp(channel3)*anchor[3]
+                    #     bbox = xywh_to_x1y1x2y2(bbox)
+                    #     try:
+                    #         bbox = np.array(bbox, dtype=np.int32)
+                    #     except:
+                    #         print(channel0, channel1, channel2, channel3)
+                    #         print(bbox)
+                    #         continue
+                    #         # raise OverflowError
+                    #     bboxList.append(bbox)
+    bboxList.sort(key=lambda tup: tup[1], reverse=True)
+    return list(map(lambda tup: tup[0], bboxList))[:5], maxProb
+    # return bboxList, maxProb
 
 if __name__ == '__main__':
     args = parse_args()
@@ -183,7 +214,7 @@ if __name__ == '__main__':
     
     #--------------------------------- main part
     model.eval()
-    phase = 'validation'
+    phase = 'train'
 
     epoch = 0
     epoch_loss = 0
@@ -191,6 +222,7 @@ if __name__ == '__main__':
     epoch_rloss = 0
 
     epoch_size = 0
+    imgs = []
     for step, data in enumerate(dataloader[phase]):
         template, detection, clabel, rlabel = data
         target = torch.zeros(clabel.shape).cuda() + 1
@@ -211,29 +243,34 @@ if __name__ == '__main__':
         # print("img shape:", img.shape)
 
         print(len(bboxList), maxProb)
-        for bbox in bboxList:
-            img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0,0,255), 2)
+        for idx,bbox in enumerate(reversed(bboxList)):
+            if idx < 2:
+                img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0,0,255), 1)
+            else:
+                img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255,0,0), idx-1)
 
-        from IPython import embed
-        embed()
+        # cv2.imwrite("img.png", img[:,:,::-1])
+        imgs.append(img)
 
-        # closs = nn.CrossEntropyLoss()(coutput, clabel)
-        # rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
-        # loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
+        closs = nn.CrossEntropyLoss()(coutput, clabel)
+        rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
+        loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
 
-        # epoch_loss += loss.item()
-        # epoch_closs += closs.item()
-        # epoch_rloss += rloss.item()
+        epoch_loss += loss.item()
+        epoch_closs += closs.item()
+        epoch_rloss += rloss.item()
 
-        # epoch_size += 1
-
-        
+        epoch_size += 1
 
         # if step % args.disp_interval == 0:
         #     print("{} step:{} loss:{:.4g} closs:{:.4g} rloss:{:.4g}".format(
         #             phase, step,
         #             epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
         #         ))
+
+        if step==63:
+            break
+
     epoch_loss /= epoch_size
     epoch_closs /= epoch_size
     epoch_rloss /= epoch_size
@@ -242,9 +279,15 @@ if __name__ == '__main__':
             phase, epoch_loss, epoch_closs, epoch_rloss,
         ))
 
+    from torchvision.utils import make_grid
+    g = np.stack(imgs)
+    g = torch.Tensor(g).byte()
+    g = make_grid(g.permute(0,3,1,2))
+    g = g.permute(1,2,0).numpy()
+    cv2.imwrite("grid.png", g[:,:,::-1]) 
+
     from IPython import embed
     embed()
-
     
 
     
