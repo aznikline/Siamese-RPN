@@ -91,6 +91,11 @@ def parse_args():
                       help='whether use tensorboard',
                       action='store_true')
 
+    #--------------------
+    parser.add_argument('--phase', dest='phase',
+                      help='directory to save models', default="train",
+                      type=str)
+
     args = parser.parse_args()
     return args
 
@@ -139,37 +144,6 @@ def outputConvertor(coutput, routput, anchor_shape):
                         continue
                         # raise OverflowError
                     bboxList.append((bbox, prob))
-
-
-                # if anchor_x1y1x2y2[0]>=0 and anchor_x1y1x2y2[1]>=0 and anchor_x1y1x2y2[2]<=255 and anchor_x1y1x2y2[3]<=255:
-                #     try:
-                #         delta = coutput[c,0,a,b]-coutput[c,1,a,b]
-                #         if delta > 10:
-                #             prob = 0
-                #         elif delta < -10:
-                #             prob = 1
-                #         else:
-                #             prob = 1/(1+math.exp(delta))
-                #         maxProb = max(maxProb, prob)
-                #     except:
-                #         print(coutput[c,0,a,b], coutput[c,1,a,b], c, a, b)
-                #         raise OverflowError
-                    # if prob >= 0.5:
-                    #     bbox = [0,0,0,0]
-                    #     channel0, channel1, channel2, channel3 = routput[c,:,a,b]
-                    #     bbox[0] = channel0*anchor[2] + anchor[0]
-                    #     bbox[1] = channel1*anchor[3] + anchor[1]
-                    #     bbox[2] = math.exp(channel2)*anchor[2]
-                    #     bbox[3] = math.exp(channel3)*anchor[3]
-                    #     bbox = xywh_to_x1y1x2y2(bbox)
-                    #     try:
-                    #         bbox = np.array(bbox, dtype=np.int32)
-                    #     except:
-                    #         print(channel0, channel1, channel2, channel3)
-                    #         print(bbox)
-                    #         continue
-                    #         # raise OverflowError
-                    #     bboxList.append(bbox)
     bboxList.sort(key=lambda tup: tup[1], reverse=True)
     return list(map(lambda tup: tup[0], bboxList))[:5], maxProb
     # return bboxList, maxProb
@@ -214,7 +188,7 @@ if __name__ == '__main__':
     
     #--------------------------------- main part
     model.eval()
-    phase = 'train'
+    phase = args.phase
 
     epoch = 0
     epoch_loss = 0
