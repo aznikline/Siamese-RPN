@@ -1,6 +1,6 @@
 from flag.builder import FlagBuilder
 from config import cfg
-from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2
+from siamrpn.utils import x1y1x2y2_to_xywh, xywh_to_x1y1x2y2, clip_anchor
 
 import json
 # import cv2
@@ -14,11 +14,13 @@ from torchvision import transforms
 
 class MyDataset(Dataset):
 
-    def __init__(self, anchor_scale = 64, k = 5):
+    def __init__(self, anchor_scale = 64, k = 5, phase='train', dataset_name=cfg.dataset_name):
         self.anchor_shape = self._get_anchor_shape(anchor_scale)
         self.k = k    
-        self.infoList = json.loads(open(str(cfg.PATH.train_dir / 'infoList.json')).read())
-        self.load_gallery(phase='train')
+        self.phase = phase
+        self.path = cfg.PATH.root_dir / 'data' / dataset_name / phase
+        self.infoList = json.loads(open(str(self.path / 'infoList.json')).read())
+        self.load_gallery()
         self.transforms = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -43,8 +45,11 @@ class MyDataset(Dataset):
             img = img.convert('RGB')
         return img
 
-    def load_gallery(self, phase='train'):
-        gallery_dir = cfg.PATH.train_dir/'gallery'
+    def load_gallery(self):
+        if self.phase == 'validation':
+            gallery_dir = self.path.parent / 'train' / 'gallery'
+        else:
+            gallery_dir = self.path/'gallery'
         gallery = {}
         for path in gallery_dir.glob('*'):
             ind = int(path.name.split('.')[0])
@@ -60,15 +65,27 @@ class MyDataset(Dataset):
 
         img_path = info['path']
         img = self.load_image(img_path)
+        original_size = img.size
         img = img.resize((cfg.detection_size, cfg.detection_size), Image.BILINEAR)
         bbox = info['bbox']
+        self.resize_bbox(bbox, original_size)
         gtbox = x1y1x2y2_to_xywh(bbox)
 
         label = info['label']
         template = self.gallery[label]
 
-        clabel, rlabel = self._gtbox_to_label(gtbox)
+        # if self.phase == 'train':
+        #     clabel, rlabel = self._gtbox_to_label(gtbox)
+        # else:
+        #     clabel, rlabel = self._get_test_label(gtbox)
+        clabel, rlabel = self._get_label(gtbox)
         return self.transforms(template), self.transforms(img), clabel, rlabel
+
+    def resize_bbox(self, bbox, original_size):
+        bbox[0] *= cfg.detection_size/original_size[0]
+        bbox[2] *= cfg.detection_size/original_size[0]
+        bbox[1] *= cfg.detection_size/original_size[1]
+        bbox[3] *= cfg.detection_size/original_size[1]
     
     '''数据转换，包括裁剪、变形、转换为tensor、归一化
     '''
@@ -81,6 +98,42 @@ class MyDataset(Dataset):
         
     """根据ground truth box构造class label和reg label
     """
+    def _get_label(self, gtbox):
+        clabel = np.zeros([5, 17, 17]) - 100
+        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+        if self.phase == 'train':
+            pos, neg = self._get_64_anchors_new(gtbox)
+            assert len(pos)+len(neg)==64
+            for a,b,c,anchor_x1y1x2y2 in pos:
+                anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
+                clabel[c,a,b] = 1
+                channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                channel2 = math.log(gtbox[2]/anchor[2])
+                channel3 = math.log(gtbox[3]/anchor[3])
+                rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+            for a,b,c,anchor in neg:
+                clabel[c,a,b] = 0
+        else :
+            for a in range(17):
+                for b in range(17):
+                    for c in range(5):
+                        anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                        anchor = xywh_to_x1y1x2y2(anchor)
+                        anchor = clip_anchor(anchor)
+                        iou = self._IOU(anchor, gtbox)
+                        anchor = x1y1x2y2_to_xywh(anchor)
+                        if iou >= cfg.pos_iou_thresh:
+                            clabel[c,a,b] = 1
+                            channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                            channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                            channel2 = math.log(gtbox[2]/anchor[2])
+                            channel3 = math.log(gtbox[3]/anchor[3])
+                            rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+                        elif iou <= cfg.neg_iou_thresh:
+                            clabel[c,a,b] = 0
+        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
+
     def _gtbox_to_label(self, gtbox):
         clabel = np.zeros([5, 17, 17]) - 100
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
@@ -110,6 +163,54 @@ class MyDataset(Dataset):
             result = np.concatenate([result, np.array(tmp).reshape([1,4])], axis = 0)
         return result
 
+    def _get_test_label(self, gtbox):
+        clabel = np.zeros([5,17,17]) - 100
+        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+        dct = {}
+        for a in range(17):
+            for b in range(17):
+                for c in range(5):
+                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                    channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                    channel2 = math.log(gtbox[2]/anchor[2])
+                    channel3 = math.log(gtbox[3]/anchor[3])
+                    rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+                    anchor = xywh_to_x1y1x2y2(anchor)
+                    if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
+                        iou = self._IOU(anchor, gtbox)
+                        if iou >= cfg.pos_iou_thresh:
+                            clabel[c,a,b] = 1
+        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
+
+    def _get_64_anchors_new(self, gtbox):
+        pos = {}
+        neg = {}
+        zero = {}
+        for a in range(17):
+            for b in range(17):
+                for c in range(5):
+                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    anchor = xywh_to_x1y1x2y2(anchor)
+                    anchor = clip_anchor(anchor)
+                    iou = self._IOU(anchor, gtbox)
+                    if iou >= cfg.pos_iou_thresh:
+                        pos[(a,b,c)] = (iou, anchor)
+                    elif iou <= cfg.neg_iou_thresh and iou > 0:
+                        neg[(a,b,c)] = (iou, anchor)
+                    else :
+                        zero[(a,b,c)] = (iou, anchor)
+        pos = sorted(pos.items(), key=lambda tup: tup[1][0], reverse=True)
+        pos = [(*tup[0], tup[1][1]) for tup in pos[:16]]
+        num = math.ceil((64-len(pos))/2)
+        neg = sorted(neg.items(), key=lambda tup: tup[1][0], reverse=True)
+        neg = [(*tup[0], tup[1][1]) for tup in neg[:num]]
+        zero = list(zero.items())
+        np.random.shuffle(zero)
+        neg += [(*tup[0], tup[1][1]) for tup in zero[:64-len(pos)-len(neg)]]
+        return pos, neg
+
+
     def _get_64_anchors(self, gtbox):
         pos = {}
         neg = {}
@@ -120,9 +221,9 @@ class MyDataset(Dataset):
                     anchor = xywh_to_x1y1x2y2(anchor)
                     if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
                         iou = self._IOU(anchor, gtbox)
-                        if iou >= 0.5:
+                        if iou >= cfg.pos_iou_thresh+0.1:
                             pos['%d,%d,%d' % (a,b,c)] = iou
-                        elif iou <= 0.2:
+                        elif iou >= cfg.neg_iou_thresh and iou < cfg.pos_iou_thresh-0.1:
                             neg['%d,%d,%d' % (a,b,c)] = iou
         pos = sorted(pos.items(),key = lambda x:x[1],reverse = True)
         pos = [list(map(int, i[0].split(','))) for i in pos[:16]]
@@ -145,14 +246,25 @@ class MyDataset(Dataset):
         area = w * h 
         return area / (sa + sb - area)
 
-def get_dataloader(num_workers=0):
+def get_dataloader(num_workers=0, batch_size=1):
     transformed_dataset_train = MyDataset()
-    train_dataloader = DataLoader(transformed_dataset_train, batch_size=cfg.TRAIN.batch_size, shuffle=True, num_workers=num_workers)
-    dataloader = {'train':train_dataloader, 'validation':train_dataloader}
+    transformed_dataset_validation = MyDataset(phase='validation')
+    transformed_dataset_test = MyDataset(phase='test')
+    train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    dataloader = {'train':train_dataloader, 'validation':validation_dataloader, 'test': test_dataloader}
     totsteps = {
-        x: len(transformed_dataset_train)//cfg.TRAIN.batch_size for x in ['train', 'test']
+        'train': len(transformed_dataset_train)//batch_size,
+        'validation': len(transformed_dataset_validation)//batch_size,
+        'test': len(transformed_dataset_test)//batch_size,
     }
-    return dataloader, totsteps
+    datasets = {
+        'train': transformed_dataset_train,
+        'validation': transformed_dataset_validation,
+        'test': transformed_dataset_test,
+    }
+    return dataloader, totsteps, datasets
 
 if __name__ == '__main__':
     import argparse
@@ -164,8 +276,12 @@ if __name__ == '__main__':
     if args.build:
         builder = FlagBuilder(cfg.PATH.root_dir)
         iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
-        builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
-                                    scaleRange=None)
+        # builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
+        #                             scaleRange=None)
+        # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
+        # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
+        builder.build("random_insert", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+                scaleRange=None)
 
     if args.testds:
         ds = MyDataset()

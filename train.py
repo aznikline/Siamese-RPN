@@ -41,9 +41,9 @@ def parse_args():
     parser.add_argument('--mGPUs', dest='mGPUs',
                       help='whether use multiple GPUs',
                       action='store_true')
-    # parser.add_argument('--bs', dest='batch_size',
-    #                   help='batch_size',
-    #                   default=1, type=int)
+    parser.add_argument('--bs', dest='batch_size',
+                      help='batch_size',
+                      default=1, type=int)
 
     # config optimization
     parser.add_argument('--o', dest='optimizer',
@@ -52,12 +52,12 @@ def parse_args():
     parser.add_argument('--lr', dest='lr',
                       help='starting learning rate',
                       default=0.001, type=float)
-    # parser.add_argument('--lr_decay_step', dest='lr_decay_step',
-    #                   help='step to do learning rate decay, unit is epoch',
-    #                   default=5, type=int)
-    # parser.add_argument('--lr_decay_gamma', dest='lr_decay_gamma',
-    #                   help='learning rate decay ratio',
-    #                   default=0.1, type=float)
+    parser.add_argument('--lr_decay_step', dest='lr_decay_step',
+                      help='step to do learning rate decay, unit is epoch',
+                      default=40, type=int)
+    parser.add_argument('--lr_decay_gamma', dest='lr_decay_gamma',
+                      help='learning rate decay ratio',
+                      default=0.1, type=float)
 
     # set training session
     parser.add_argument('--s', dest='session',
@@ -104,10 +104,10 @@ if __name__ == '__main__':
     assert torch.cuda.is_available(), "GPU is in need"
 
     # ------------------------------- get dataloaders
-    dataloader, totsteps = get_dataloader(args.num_workers)
+    dataloader, totsteps, datasets = get_dataloader(args.num_workers, args.batch_size)
 
     #--------------------------------- output_dir setup
-    datasetName = 'flag-{}'.format(cfg.PATH.train_dir.parent.name)
+    datasetName = 'flag-{}'.format(cfg.dataset_name)
     output_dir = cfg.PATH.experiment_dir / datasetName
     output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -130,12 +130,13 @@ if __name__ == '__main__':
     if args.optimizer == 'adam':
         optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=0)
     elif args.optimizer == 'sgd':
-        optimizer = optim.SGD(params, momentum=cfg.TRAIN.momentum)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.1)
+        optimizer = optim.SGD(params, lr=lr, momentum=cfg.TRAIN.momentum)
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- loading part
     if args.resume:
         load_name = output_dir / args.load_name
+        load_name = str(load_name)
         print("loading checkpoint {}".format(load_name))
         checkpoint = torch.load(load_name)
         args.session = checkpoint['session']
@@ -150,110 +151,118 @@ if __name__ == '__main__':
         pass
 
     #--------------------------------- logging part
-    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}_{}{}".format(
+    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}_{}{}".format(
             args.net, 
             'opt', args.optimizer,
-            'lr', args.lr,
+            'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
             'ses',args.session,
+            'lmbda',cfg.lmbda
         )
     (output_dir / args.save_dir / 'models').mkdir(exist_ok=True, parents=True)
     (output_dir / args.save_dir / 'logs').mkdir(exist_ok=True, parents=True)
     if args.use_tfboard:
         from tensorboardX import SummaryWriter
         train_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'train'))
-        # test_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'test'))
+        val_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'validation'))
     #--------------------------------- training part
     if args.mGPUs:
         model = torch.nn.DataParallel(model)
 
     for epoch in range(args.start_epoch, args.max_epochs):
-        model.train()
+        for phase in ['train','validation']:
+            if phase == 'train':
+                scheduler.step()
+                model.train()
+                logger = train_tb
+            else:
+                model.eval()
+                logger = val_tb
 
-        phase = 'train'
-        logger = train_tb
+            epoch_loss = 0
+            epoch_closs = 0
+            epoch_rloss = 0
 
-        epoch_loss = 0
-        epoch_closs = 0
-        epoch_rloss = 0
+            epoch_size = 0
+            start = time.time()
+            epoch_start = start
+            for step, data in enumerate(dataloader[phase]):
+                if phase == 'validation' and step > cfg.TEST.max_validation:
+                    break
+                template, detection, clabel, rlabel = data
+                target = torch.zeros(clabel.shape).cuda() + 1
+                template = Variable(template.cuda())
+                detection = Variable(detection.cuda())
+                clabel = Variable(clabel.cuda())
+                rlabel = Variable(rlabel.cuda())
+                dltime = time.time()
 
-        epoch_size = 0
-        start = time.time()
-        epoch_start = start
-        for step, data in enumerate(dataloader[phase]):
-            template, detection, clabel, rlabel = data
-            target = torch.zeros(clabel.shape).cuda() + 1
-            template = Variable(template.cuda())
-            detection = Variable(detection.cuda())
-            clabel = Variable(clabel.cuda())
-            rlabel = Variable(rlabel.cuda())
-            dltime = time.time()
+                optimizer.zero_grad()
 
-            optimizer.zero_grad()
+                # forward
+                coutput, routput = model(template, detection)
 
-            # forward
-            coutput, routput = model(template, detection)
+                coutput, clabel = coutput.squeeze(), clabel.squeeze()
+                coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
 
-            coutput, clabel = coutput.squeeze(), clabel.squeeze()
-            coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
+                closs = nn.CrossEntropyLoss()(coutput, clabel)
+                rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
+                loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
+                # loss, closs, rloss = Myloss()(coutput, clabel, routput, rlabel, cfg.lmbda)
 
-            closs = nn.CrossEntropyLoss()(coutput, clabel)
-            rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
-            loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
+                if phase == 'train':
+                    loss.backward()
+                    optimizer.step()
+
+                epoch_loss += loss.item()
+                epoch_closs += closs.item()
+                epoch_rloss += rloss.item()
+
+                epoch_size += 1
+
+                if args.use_tfboard:
+                    info = {
+                        'loss': loss.item(),
+                        'rloss': rloss.item(),
+                        'closs': closs.item(),
+                        'learning_rate': scheduler.get_lr()[0],
+                    }
+                    for k,v in info.items():
+                        logger.add_scalar(k,v,(epoch*min(totsteps[phase], cfg.TEST.max_validation) + step)*totsteps['train']//totsteps[phase])
+                end = time.time()
+                if step % args.disp_interval == 0:
+                    print("{} e:{}/{} step:{} lr:{:.3g} loss:{:.4g} closs:{:.4g} rloss:{:.4g} dload:{:.3g}".format(
+                            phase, epoch,args.max_epochs, step, scheduler.get_lr()[0],
+                            epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
+                            (dltime-start)/(end-start)
+                        ))
+                start = time.time()
+
+            epoch_loss /= epoch_size
+            epoch_closs /= epoch_size
+            epoch_rloss /= epoch_size
+
+            print('Finish {} e:{} loss:{:4g} closs:{:4g} rloss:{:4g} time:{:3g}'.format(
+                    phase, epoch, epoch_loss, epoch_closs, epoch_rloss,
+                    start - epoch_start
+                ))
 
             if phase == 'train':
-                loss.backward()
-                optimizer.step()
-
-            epoch_loss += loss.item()
-            epoch_closs += closs.item()
-            epoch_rloss += rloss.item()
-
-            epoch_size += 1
-
-            if args.use_tfboard and phase == 'train':
-                info = {
-                    'loss': loss.item(),
-                    'rloss': rloss.item(),
-                    'closs': closs.item(),
-                    'learning_rate': scheduler.get_lr()[0],
+                save_name = str(output_dir/args.save_dir/'models'/"{}_{}_{}.pth".format(args.session, epoch, step))
+                state = {
+                    'session': args.session,
+                    'epoch': epoch,
+                    'model': model.module.state_dict() if args.mGPUs else model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
                 }
-                for k,v in info.items():
-                    logger.add_scalar(k,v,(epoch*totsteps[phase] + step)*totsteps['train']//totsteps[phase])
-            end = time.time()
-            if step % args.disp_interval == 0:
-                print("{} e:{}/{} step:{} lr:{:.3g} loss:{:.4g} closs:{:.4g} rloss:{:.4g} dload:{:.3g}".format(
-                        phase, epoch,args.max_epochs, step, scheduler.get_lr()[0],
-                        epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
-                        (dltime-start)/(end-start)
-                    ))
-            start = time.time()
+                torch.save(state, save_name)
+                torch.save(state, str(output_dir/args.save_dir/'models'/'latest'))
+                print('save model: {}'.format(save_name))
 
-        epoch_loss /= epoch_size
-        epoch_closs /= epoch_size
-        epoch_rloss /= epoch_size
-
-        print('Finish {} e:{} loss:{:4g} closs:{:4g} rloss:{:4g} time:{:3g}'.format(
-                phase, epoch, epoch_loss, epoch_closs, epoch_rloss,
-                start - epoch_start
-            ))
-
-        if phase == 'train':
-            save_name = str(output_dir/args.save_dir/'models'/"{}_{}_{}.pth".format(args.session, epoch, step))
-            state = {
-                'session': args.session,
-                'epoch': epoch,
-                'model': model.module.state_dict() if args.mGPUs else model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-            }
-            torch.save(state, save_name)
-            torch.save(state, 'latest')
-            print('save model: {}'.format(save_name))
-
-        print('-'*20)
+            print('-'*20)
 
     if args.use_tfboard:
         train_tb.close()
-        test_tb.close()
+        val_tb.close()
 
     from IPython import embed
     embed()
