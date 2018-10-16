@@ -103,6 +103,7 @@ class MyDataset(Dataset):
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
         if self.phase == 'train':
             pos, neg = self._get_64_anchors_new(gtbox)
+            assert len(pos)+len(neg)==64
             for a,b,c,anchor_x1y1x2y2 in pos:
                 anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
                 clabel[c,a,b] = 1
@@ -185,6 +186,7 @@ class MyDataset(Dataset):
     def _get_64_anchors_new(self, gtbox):
         pos = {}
         neg = {}
+        zero = {}
         for a in range(17):
             for b in range(17):
                 for c in range(5):
@@ -194,12 +196,18 @@ class MyDataset(Dataset):
                     iou = self._IOU(anchor, gtbox)
                     if iou >= cfg.pos_iou_thresh:
                         pos[(a,b,c)] = (iou, anchor)
-                    elif iou <= cfg.neg_iou_thresh:
+                    elif iou <= cfg.neg_iou_thresh and iou > 0:
                         neg[(a,b,c)] = (iou, anchor)
+                    else :
+                        zero[(a,b,c)] = (iou, anchor)
         pos = sorted(pos.items(), key=lambda tup: tup[1][0], reverse=True)
         pos = [(*tup[0], tup[1][1]) for tup in pos[:16]]
+        num = math.ceil((64-len(pos))/2)
         neg = sorted(neg.items(), key=lambda tup: tup[1][0], reverse=True)
-        neg = [(*tup[0], tup[1][1]) for tup in neg[:64-len(pos)]]
+        neg = [(*tup[0], tup[1][1]) for tup in neg[:num]]
+        zero = list(zero.items())
+        np.random.shuffle(zero)
+        neg += [(*tup[0], tup[1][1]) for tup in zero[:64-len(pos)-len(neg)]]
         return pos, neg
 
 
