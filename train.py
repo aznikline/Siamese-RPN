@@ -67,7 +67,7 @@ def parse_args():
     # resume trained model
     parser.add_argument('--r', dest='resume',
                       help='resume checkpoint or not',
-                      default=False, type=bool)
+                      action='store_true')
     parser.add_argument('--f', dest='finetune',
                       help='finetune or not',
                       default=False, type=bool)
@@ -87,6 +87,9 @@ def parse_args():
     parser.add_argument('--use_tfb', dest='use_tfboard',
                       help='whether use tensorboard',
                       action='store_true')
+    parser.add_argument('--w', dest='weight_decay',
+                      help='starting learning rate',
+                      default=1e-5, type=float)
 
     args = parser.parse_args()
     return args
@@ -128,9 +131,9 @@ if __name__ == '__main__':
     #--------------------------------- optimizer setup
     lr = args.lr
     if args.optimizer == 'adam':
-        optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=0)
+        optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=args.weight_decay)
     elif args.optimizer == 'sgd':
-        optimizer = optim.SGD(params, lr=lr, momentum=cfg.TRAIN.momentum)
+        optimizer = optim.SGD(params, lr=lr, momentum=cfg.TRAIN.momentum, weight_decay=args.weight_decay)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- loading part
@@ -145,21 +148,24 @@ if __name__ == '__main__':
         optimizer.load_state_dict(checkpoint['optimizer'])
         lr = optimizer.param_groups[0]['lr']
         print("loaded checkpoint {}".format(load_name))
+        args.save_dir = args.load_name.split('/')[0]
     elif args.finetune:
         raise NotImplementedError
     else:
         pass
 
     #--------------------------------- logging part
-    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}_{}{}".format(
-            args.net, 
-            'opt', args.optimizer,
-            'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
-            'ses',args.session,
-            'lmbda',cfg.lmbda
-        )
-    (output_dir / args.save_dir / 'models').mkdir(exist_ok=True, parents=True)
-    (output_dir / args.save_dir / 'logs').mkdir(exist_ok=True, parents=True)
+    if not args.resume:
+        args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}_{}{}_{}{}".format(
+                args.net, 
+                'opt', args.optimizer,
+                'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
+                'ses',args.session,
+                'lmbda',cfg.lmbda,
+                'w',args.weight_decay,
+            )
+        (output_dir / args.save_dir / 'models').mkdir(exist_ok=True, parents=True)
+        (output_dir / args.save_dir / 'logs').mkdir(exist_ok=True, parents=True)
     if args.use_tfboard:
         from tensorboardX import SummaryWriter
         train_tb = SummaryWriter(str(output_dir/args.save_dir/'logs'/'train'))
@@ -226,8 +232,12 @@ if __name__ == '__main__':
                         'closs': closs.item(),
                         'learning_rate': scheduler.get_lr()[0],
                     }
+                    if phase=='train':
+                        totStep = totsteps[phase]
+                    else:
+                        totStep = min(totsteps[phase], cfg.TEST.max_validation)
                     for k,v in info.items():
-                        logger.add_scalar(k,v,(epoch*min(totsteps[phase], cfg.TEST.max_validation) + step)*totsteps['train']//totsteps[phase])
+                        logger.add_scalar(k,v,(epoch*totStep + step)*totsteps['train']//totsteps[phase])
                 end = time.time()
                 if step % args.disp_interval == 0:
                     print("{} e:{}/{} step:{} lr:{:.3g} loss:{:.4g} closs:{:.4g} rloss:{:.4g} dload:{:.3g}".format(
