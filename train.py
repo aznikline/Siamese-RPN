@@ -151,11 +151,12 @@ if __name__ == '__main__':
         pass
 
     #--------------------------------- logging part
-    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}".format(
+    args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}_{}{}".format(
             args.net, 
             'opt', args.optimizer,
             'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
             'ses',args.session,
+            'lmbda',cfg.lmbda
         )
     (output_dir / args.save_dir / 'models').mkdir(exist_ok=True, parents=True)
     (output_dir / args.save_dir / 'logs').mkdir(exist_ok=True, parents=True)
