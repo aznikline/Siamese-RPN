@@ -101,7 +101,7 @@ class MyDataset(Dataset):
     def _get_label(self, gtbox):
         clabel = np.zeros([5, 17, 17]) - 100
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
-        if self.phase == 'train':
+        if self.phase in ['train','validation']:
             pos, neg = self._get_64_anchors_new(gtbox)
             assert len(pos)+len(neg)==64
             for a,b,c,anchor_x1y1x2y2 in pos:
