@@ -237,7 +237,7 @@ if __name__ == '__main__':
                     else:
                         totStep = min(totsteps[phase], cfg.TEST.max_validation)
                     for k,v in info.items():
-                        logger.add_scalar(k,v,(epoch*totStep + step)*totsteps['train']//totsteps[phase])
+                        logger.add_scalar(k,v,(epoch*totStep + step)*totsteps['train']//totStep)
                 end = time.time()
                 if step % args.disp_interval == 0:
                     print("{} e:{}/{} step:{} lr:{:.3g} loss:{:.4g} closs:{:.4g} rloss:{:.4g} dload:{:.3g}".format(
