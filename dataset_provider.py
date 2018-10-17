@@ -280,8 +280,8 @@ if __name__ == '__main__':
         #                             scaleRange=None)
         # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
         # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
-        builder.build("random_insert", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
-                scaleRange=None)
+        builder.build("random_insert_10loop", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+                scaleRange=None, iter_loop=10)
 
     if args.testds:
         ds = MyDataset()
