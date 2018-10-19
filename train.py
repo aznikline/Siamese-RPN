@@ -225,7 +225,7 @@ if __name__ == '__main__':
 
                 epoch_size += 1
 
-                if args.use_tfboard:
+                if args.use_tfboard and step % (args.disp_interval//5) == 0:
                     info = {
                         'loss': loss.item(),
                         'rloss': rloss.item(),
