@@ -14,9 +14,10 @@ from torchvision import transforms
 
 class MyDataset(Dataset):
 
-    def __init__(self, anchor_scale = 64, k = 5, phase='train', dataset_name=cfg.dataset_name):
+    def __init__(self, dataset_name, anchor_scale = 64, k = 5, phase='train'):
         self.anchor_shape = self._get_anchor_shape(anchor_scale)
-        self.k = k    
+        self.k = k
+        self.grid_len = cfg.grid_len
         self.phase = phase
         self.path = cfg.PATH.root_dir / 'data' / dataset_name / phase
         self.infoList = json.loads(open(str(self.path / 'infoList.json')).read())
@@ -118,7 +119,7 @@ class MyDataset(Dataset):
             for a in range(17):
                 for b in range(17):
                     for c in range(5):
-                        anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                        anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
                         anchor = xywh_to_x1y1x2y2(anchor)
                         anchor = clip_anchor(anchor)
                         iou = self._IOU(anchor, gtbox)
@@ -159,7 +160,7 @@ class MyDataset(Dataset):
     def _anchor_coord(self, pos):
         result = np.ndarray([0, 4])
         for i in pos:
-            tmp = [7+15*i[0], 7+15*i[1], self.anchor_shape[i[2]][0], self.anchor_shape[i[2]][1]]
+            tmp = [self.grid_len//2+self.grid_len*i[0], self.grid_len//2+self.grid_len*i[1], self.anchor_shape[i[2]][0], self.anchor_shape[i[2]][1]]
             result = np.concatenate([result, np.array(tmp).reshape([1,4])], axis = 0)
         return result
 
@@ -170,7 +171,7 @@ class MyDataset(Dataset):
         for a in range(17):
             for b in range(17):
                 for c in range(5):
-                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
                     channel0 = (gtbox[0] - anchor[0])/anchor[2]
                     channel1 = (gtbox[1] - anchor[1])/anchor[3]
                     channel2 = math.log(gtbox[2]/anchor[2])
@@ -190,7 +191,7 @@ class MyDataset(Dataset):
         for a in range(17):
             for b in range(17):
                 for c in range(5):
-                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
                     anchor = xywh_to_x1y1x2y2(anchor)
                     anchor = clip_anchor(anchor)
                     iou = self._IOU(anchor, gtbox)
@@ -217,7 +218,7 @@ class MyDataset(Dataset):
         for a in range(17):
             for b in range(17):
                 for c in range(5):
-                    anchor = [7+15*a, 7+15*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
                     anchor = xywh_to_x1y1x2y2(anchor)
                     if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
                         iou = self._IOU(anchor, gtbox)
@@ -246,10 +247,10 @@ class MyDataset(Dataset):
         area = w * h 
         return area / (sa + sb - area)
 
-def get_dataloader(num_workers=0, batch_size=1):
-    transformed_dataset_train = MyDataset()
-    transformed_dataset_validation = MyDataset(phase='validation')
-    transformed_dataset_test = MyDataset(phase='test')
+def get_dataloader(dataset_name,num_workers=0, batch_size=1):
+    transformed_dataset_train = MyDataset(dataset_name=dataset_name)
+    transformed_dataset_validation = MyDataset(phase='validation',dataset_name=dataset_name)
+    transformed_dataset_test = MyDataset(phase='test',dataset_name=dataset_name)
     train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=True, num_workers=num_workers)
@@ -280,8 +281,8 @@ if __name__ == '__main__':
         #                             scaleRange=None)
         # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
         # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
-        builder.build("random_insert_10loop", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
-                scaleRange=None, iter_loop=10)
+        builder.build("3loop_for_resnet", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+                scaleRange=None, iter_loop=3)
 
     if args.testds:
         ds = MyDataset()
