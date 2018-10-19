@@ -10,7 +10,7 @@ __C.PATH.root_dir = Path('/unsullied/sharefs/huangyucheng/data/dl-github/Siamese
 __C.PATH.experiment_dir = __C.PATH.root_dir / 'experiment'
 
 # __C.dataset_name = '64scale_train_dataset'
-__C.dataset_name = 'random_insert'
+__C.dataset_name = 'random_insert_10loop'
 
 __C.template_size = 127
 __C.detection_size = 255
