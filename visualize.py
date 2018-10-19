@@ -25,7 +25,7 @@ def parse_args():
                       help='starting epoch',
                       default=0, type=int)
     parser.add_argument('--net', dest='net',
-                      default='alexnet', type=str)
+                      required=True, type=str)
     parser.add_argument('--epochs', dest='max_epochs',
                       help='number of epochs to train',
                       default=50, type=int)
@@ -44,20 +44,20 @@ def parse_args():
     parser.add_argument('--mGPUs', dest='mGPUs',
                       help='whether use multiple GPUs',
                       action='store_true')
-    # parser.add_argument('--bs', dest='batch_size',
-    #                   help='batch_size',
-    #                   default=1, type=int)
+    parser.add_argument('--bs', dest='batch_size',
+                      help='batch_size',
+                      default=1, type=int)
 
     # config optimization
-    parser.add_argument('--o', dest='optimizer',
-                      help='training optimizer',
-                      default="adam", type=str)
-    parser.add_argument('--lr', dest='lr',
-                      help='starting learning rate',
-                      default=0.001, type=float)
+    # parser.add_argument('--o', dest='optimizer',
+    #                   help='training optimizer',
+    #                   default="adam", type=str)
+    # parser.add_argument('--lr', dest='lr',
+    #                   help='starting learning rate',
+    #                   default=0.001, type=float)
     # parser.add_argument('--lr_decay_step', dest='lr_decay_step',
     #                   help='step to do learning rate decay, unit is epoch',
-    #                   default=5, type=int)
+    #                   default=40, type=int)
     # parser.add_argument('--lr_decay_gamma', dest='lr_decay_gamma',
     #                   help='learning rate decay ratio',
     #                   default=0.1, type=float)
@@ -70,7 +70,7 @@ def parse_args():
     # resume trained model
     parser.add_argument('--r', dest='resume',
                       help='resume checkpoint or not',
-                      default=False, type=bool)
+                      action='store_true')
     parser.add_argument('--f', dest='finetune',
                       help='finetune or not',
                       default=False, type=bool)
@@ -87,9 +87,15 @@ def parse_args():
                       help='checkpoint to load model',
                       default=0, type=int)
     # log and diaplay
-    parser.add_argument('--use_tfb', dest='use_tfboard',
-                      help='whether use tensorboard',
-                      action='store_true')
+    # parser.add_argument('--use_tfb', dest='use_tfboard',
+    #                   help='whether use tensorboard',
+    #                   action='store_true')
+    # parser.add_argument('--w', dest='weight_decay',
+    #                   help='starting learning rate',
+    #                   default=1e-5, type=float)
+    parser.add_argument('--ds', dest='dataset_name',
+                      help='name of dataset',
+                      required=True, type=str)
 
     #--------------------
     parser.add_argument('--phase', dest='phase',
@@ -115,7 +121,7 @@ def outputConvertor(coutput, routput, anchor_shape):
     for a in range(17):
         for b in range(17):
             for c in range(5):
-                anchor = [7+15*a, 7+15*b, anchor_shape[c][0], anchor_shape[c][1]]
+                anchor = [cfg.grid_len//2+cfg.grid_len*a, cfg.grid_len//2+cfg.grid_len*b, anchor_shape[c][0], anchor_shape[c][1]]
                 anchor_x1y1x2y2 = xywh_to_x1y1x2y2(anchor)
                 anchor_x1y1x2y2 = clip_anchor(anchor_x1y1x2y2)
                 anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
@@ -160,15 +166,24 @@ if __name__ == '__main__':
     assert torch.cuda.is_available(), "GPU is in need"
 
     # ------------------------------- get dataloaders
-    dataloader, totsteps, datasets = get_dataloader(args.num_workers)
+    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,args.num_workers, args.batch_size)
 
     #--------------------------------- output_dir setup
-    datasetName = 'flag-{}'.format(cfg.dataset_name)
+    datasetName = 'flag-{}'.format(args.dataset_name)
     output_dir = cfg.PATH.experiment_dir / datasetName
     output_dir.mkdir(exist_ok=True, parents=True)
 
     #-------------------------------- get model here
-    model = SiameseRPN()
+    if args.net=='alexnet':
+        from siamrpn.alexnet import alexnet
+        model = alexnet()
+    elif args.net.startswith('resnet'):
+        assert args.net in ['resnet18','resnet34','resnet50','resnet101','resnet152'], 'check net input!'
+        from siamrpn.resnet import resnet
+        num_layers = int(args.net[6:])
+        model = resnet(num_layers)
+    else:
+        raise NameError('no such net!!')
     model = model.cuda()
 
     for param in model.parameters():
