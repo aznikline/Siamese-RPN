@@ -129,12 +129,6 @@ if __name__ == '__main__':
         raise NameError('no such net!!')
     model = model.cuda()
 
-    fix_layers = [0,3,6]
-    for i in fix_layers:
-        layer = model.features[i]
-        for param in layer.parameters():
-            param.requires_grad = False
-
     params = []
     for param in model.parameters():
         if param.requires_grad:
