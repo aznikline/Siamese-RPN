@@ -108,9 +108,6 @@ if __name__ == '__main__':
 
     assert torch.cuda.is_available(), "GPU is in need"
 
-    # ------------------------------- get dataloaders
-    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,args.num_workers, args.batch_size)
-
     #--------------------------------- output_dir setup
     datasetName = 'flag-{}'.format(args.dataset_name)
     output_dir = cfg.PATH.experiment_dir / datasetName
@@ -120,11 +117,19 @@ if __name__ == '__main__':
     if args.net=='alexnet':
         from siamrpn.alexnet import alexnet
         model = alexnet()
+        cfg.anchor_scale = 64
+        cfg.template_size = 127
+        cfg.detection_size = 255
+        cfg.grid_len = 15
     elif args.net.startswith('resnet'):
         assert args.net in ['resnet18','resnet34','resnet50','resnet101','resnet152'], 'check net input!'
         from siamrpn.resnet import resnet
         num_layers = int(args.net[6:])
         model = resnet(num_layers)
+        cfg.anchor_scale = 85
+        cfg.template_size = 96
+        cfg.detection_size = 340
+        cfg.grid_len = 20
     else:
         raise NameError('no such net!!')
     model = model.cuda()
@@ -133,6 +138,10 @@ if __name__ == '__main__':
     for param in model.parameters():
         if param.requires_grad:
             params.append(param)
+            
+    # ------------------------------- get dataloaders
+    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,args.num_workers, args.batch_size)
+
     #--------------------------------- optimizer setup
     lr = args.lr
     if args.optimizer == 'adam':

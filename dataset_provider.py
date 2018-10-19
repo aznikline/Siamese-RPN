@@ -289,6 +289,10 @@ if __name__ == '__main__':
                 scaleRange=None, iter_loop=3)
 
     if args.testds:
+        cfg.anchor_scale = 85
+        cfg.template_size = 96
+        cfg.detection_size = 340
+        cfg.grid_len = 20
         ds = MyDataset('3loop_for_resnet')
         from IPython import embed
         embed()
