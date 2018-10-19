@@ -101,7 +101,7 @@ class MyDataset(Dataset):
     def _get_label(self, gtbox):
         clabel = np.zeros([5, 17, 17]) - 100
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
-        if self.phase == 'train':
+        if self.phase in ['train','validation']:
             pos, neg = self._get_64_anchors_new(gtbox)
             assert len(pos)+len(neg)==64
             for a,b,c,anchor_x1y1x2y2 in pos:
@@ -280,8 +280,8 @@ if __name__ == '__main__':
         #                             scaleRange=None)
         # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
         # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
-        builder.build("random_insert", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
-                scaleRange=None)
+        builder.build("random_insert_10loop", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+                scaleRange=None, iter_loop=10)
 
     if args.testds:
         ds = MyDataset()
