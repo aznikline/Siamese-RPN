@@ -68,7 +68,7 @@ class MyDataset(Dataset):
         img = self.load_image(img_path)
         original_size = img.size
         img = img.resize((cfg.detection_size, cfg.detection_size), Image.BILINEAR)
-        bbox = info['bbox']
+        bbox = info['bbox'][:]
         self.resize_bbox(bbox, original_size)
         gtbox = x1y1x2y2_to_xywh(bbox)
 
@@ -135,54 +135,54 @@ class MyDataset(Dataset):
                             clabel[c,a,b] = 0
         return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
 
-    def _gtbox_to_label(self, gtbox):
-        clabel = np.zeros([5, 17, 17]) - 100
-        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
-        pos, neg = self._get_64_anchors(gtbox)
-        for i in range(len(pos)):
-            clabel[pos[i, 2], pos[i, 0], pos[i, 1]] = 1
-        for i in range(len(neg)):
-            clabel[neg[i, 2], neg[i, 0], neg[i, 1]] = 0
-        pos_coord = self._anchor_coord(pos)
-        channel0 = (gtbox[0] - pos_coord[:, 0]) / pos_coord[:, 2]
-        channel1 = (gtbox[1] - pos_coord[:, 1]) / pos_coord[:, 3]
-        channel2 = np.array([math.log(i) for i in (gtbox[2] / pos_coord[:, 2]).tolist()])
-        channel3 = np.array([math.log(i) for i in (gtbox[3] / pos_coord[:, 3]).tolist()])
-        for i in range(len(pos)):
-            rlabel[pos[i][2]*4, pos[i][0], pos[i][1]] = channel0[i]
-            rlabel[pos[i][2]*4 + 1, pos[i][0], pos[i][1]] = channel1[i]
-            rlabel[pos[i][2]*4 + 2, pos[i][0], pos[i][1]] = channel2[i]
-            rlabel[pos[i][2]*4 + 3, pos[i][0], pos[i][1]] = channel3[i]
-        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
+    # def _gtbox_to_label(self, gtbox):
+    #     clabel = np.zeros([5, 17, 17]) - 100
+    #     rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+    #     pos, neg = self._get_64_anchors(gtbox)
+    #     for i in range(len(pos)):
+    #         clabel[pos[i, 2], pos[i, 0], pos[i, 1]] = 1
+    #     for i in range(len(neg)):
+    #         clabel[neg[i, 2], neg[i, 0], neg[i, 1]] = 0
+    #     pos_coord = self._anchor_coord(pos)
+    #     channel0 = (gtbox[0] - pos_coord[:, 0]) / pos_coord[:, 2]
+    #     channel1 = (gtbox[1] - pos_coord[:, 1]) / pos_coord[:, 3]
+    #     channel2 = np.array([math.log(i) for i in (gtbox[2] / pos_coord[:, 2]).tolist()])
+    #     channel3 = np.array([math.log(i) for i in (gtbox[3] / pos_coord[:, 3]).tolist()])
+    #     for i in range(len(pos)):
+    #         rlabel[pos[i][2]*4, pos[i][0], pos[i][1]] = channel0[i]
+    #         rlabel[pos[i][2]*4 + 1, pos[i][0], pos[i][1]] = channel1[i]
+    #         rlabel[pos[i][2]*4 + 2, pos[i][0], pos[i][1]] = channel2[i]
+    #         rlabel[pos[i][2]*4 + 3, pos[i][0], pos[i][1]] = channel3[i]
+    #     return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
     
-    """根据anchor在label中的位置来获取anchor在detection frame中的坐标
-    """
-    def _anchor_coord(self, pos):
-        result = np.ndarray([0, 4])
-        for i in pos:
-            tmp = [self.grid_len//2+self.grid_len*i[0], self.grid_len//2+self.grid_len*i[1], self.anchor_shape[i[2]][0], self.anchor_shape[i[2]][1]]
-            result = np.concatenate([result, np.array(tmp).reshape([1,4])], axis = 0)
-        return result
+    # """根据anchor在label中的位置来获取anchor在detection frame中的坐标
+    # """
+    # def _anchor_coord(self, pos):
+    #     result = np.ndarray([0, 4])
+    #     for i in pos:
+    #         tmp = [self.grid_len//2+self.grid_len*i[0], self.grid_len//2+self.grid_len*i[1], self.anchor_shape[i[2]][0], self.anchor_shape[i[2]][1]]
+    #         result = np.concatenate([result, np.array(tmp).reshape([1,4])], axis = 0)
+    #     return result
 
-    def _get_test_label(self, gtbox):
-        clabel = np.zeros([5,17,17]) - 100
-        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
-        dct = {}
-        for a in range(17):
-            for b in range(17):
-                for c in range(5):
-                    anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
-                    channel0 = (gtbox[0] - anchor[0])/anchor[2]
-                    channel1 = (gtbox[1] - anchor[1])/anchor[3]
-                    channel2 = math.log(gtbox[2]/anchor[2])
-                    channel3 = math.log(gtbox[3]/anchor[3])
-                    rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
-                    anchor = xywh_to_x1y1x2y2(anchor)
-                    if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
-                        iou = self._IOU(anchor, gtbox)
-                        if iou >= cfg.pos_iou_thresh:
-                            clabel[c,a,b] = 1
-        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
+    # def _get_test_label(self, gtbox):
+    #     clabel = np.zeros([5,17,17]) - 100
+    #     rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+    #     dct = {}
+    #     for a in range(17):
+    #         for b in range(17):
+    #             for c in range(5):
+    #                 anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+    #                 channel0 = (gtbox[0] - anchor[0])/anchor[2]
+    #                 channel1 = (gtbox[1] - anchor[1])/anchor[3]
+    #                 channel2 = math.log(gtbox[2]/anchor[2])
+    #                 channel3 = math.log(gtbox[3]/anchor[3])
+    #                 rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+    #                 anchor = xywh_to_x1y1x2y2(anchor)
+    #                 if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
+    #                     iou = self._IOU(anchor, gtbox)
+    #                     if iou >= cfg.pos_iou_thresh:
+    #                         clabel[c,a,b] = 1
+    #     return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
 
     def _get_64_anchors_new(self, gtbox):
         pos = {}
@@ -195,12 +195,16 @@ class MyDataset(Dataset):
                     anchor = xywh_to_x1y1x2y2(anchor)
                     anchor = clip_anchor(anchor)
                     iou = self._IOU(anchor, gtbox)
+                    # if iou>0.3:
+                        # print(x1y1x2y2_to_xywh(anchor), gtbox, iou)
+
                     if iou >= cfg.pos_iou_thresh:
                         pos[(a,b,c)] = (iou, anchor)
                     elif iou <= cfg.neg_iou_thresh and iou > 0:
                         neg[(a,b,c)] = (iou, anchor)
                     else :
                         zero[(a,b,c)] = (iou, anchor)
+        # print(len(pos), len(neg), len(zero))
         pos = sorted(pos.items(), key=lambda tup: tup[1][0], reverse=True)
         pos = [(*tup[0], tup[1][1]) for tup in pos[:16]]
         num = math.ceil((64-len(pos))/2)
@@ -212,25 +216,25 @@ class MyDataset(Dataset):
         return pos, neg
 
 
-    def _get_64_anchors(self, gtbox):
-        pos = {}
-        neg = {}
-        for a in range(17):
-            for b in range(17):
-                for c in range(5):
-                    anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
-                    anchor = xywh_to_x1y1x2y2(anchor)
-                    if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
-                        iou = self._IOU(anchor, gtbox)
-                        if iou >= cfg.pos_iou_thresh+0.1:
-                            pos['%d,%d,%d' % (a,b,c)] = iou
-                        elif iou >= cfg.neg_iou_thresh and iou < cfg.pos_iou_thresh-0.1:
-                            neg['%d,%d,%d' % (a,b,c)] = iou
-        pos = sorted(pos.items(),key = lambda x:x[1],reverse = True)
-        pos = [list(map(int, i[0].split(','))) for i in pos[:16]]
-        neg = sorted(neg.items(),key = lambda x:x[1],reverse = True)
-        neg = [list(map(int, i[0].split(','))) for i in neg[:(64-len(pos))]]
-        return np.array(pos), np.array(neg)
+    # def _get_64_anchors(self, gtbox):
+    #     pos = {}
+    #     neg = {}
+    #     for a in range(17):
+    #         for b in range(17):
+    #             for c in range(5):
+    #                 anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+    #                 anchor = xywh_to_x1y1x2y2(anchor)
+    #                 if anchor[0]>=0 and anchor[1]>=0 and anchor[2]<=255 and anchor[3]<=255:
+    #                     iou = self._IOU(anchor, gtbox)
+    #                     if iou >= cfg.pos_iou_thresh+0.1:
+    #                         pos['%d,%d,%d' % (a,b,c)] = iou
+    #                     elif iou >= cfg.neg_iou_thresh and iou < cfg.pos_iou_thresh-0.1:
+    #                         neg['%d,%d,%d' % (a,b,c)] = iou
+    #     pos = sorted(pos.items(),key = lambda x:x[1],reverse = True)
+    #     pos = [list(map(int, i[0].split(','))) for i in pos[:16]]
+    #     neg = sorted(neg.items(),key = lambda x:x[1],reverse = True)
+    #     neg = [list(map(int, i[0].split(','))) for i in neg[:(64-len(pos))]]
+    #     return np.array(pos), np.array(neg)
 
 #    def _f(self, x):
 #        if x <= 0:      return 0
@@ -248,9 +252,9 @@ class MyDataset(Dataset):
         return area / (sa + sb - area)
 
 def get_dataloader(dataset_name,num_workers=0, batch_size=1):
-    transformed_dataset_train = MyDataset(dataset_name=dataset_name)
-    transformed_dataset_validation = MyDataset(phase='validation',dataset_name=dataset_name)
-    transformed_dataset_test = MyDataset(phase='test',dataset_name=dataset_name)
+    transformed_dataset_train = MyDataset(dataset_name=dataset_name,anchor_scale=cfg.anchor_scale)
+    transformed_dataset_validation = MyDataset(phase='validation',dataset_name=dataset_name, anchor_scale=cfg.anchor_scale)
+    transformed_dataset_test = MyDataset(phase='test',dataset_name=dataset_name, anchor_scale=cfg.anchor_scale)
     train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=True, num_workers=num_workers)
@@ -285,7 +289,7 @@ if __name__ == '__main__':
                 scaleRange=None, iter_loop=3)
 
     if args.testds:
-        ds = MyDataset()
+        ds = MyDataset('3loop_for_resnet')
         from IPython import embed
         embed()
 
