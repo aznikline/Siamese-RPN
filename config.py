@@ -21,7 +21,7 @@ __C.template_size = None
 __C.detection_size = None
 __C.grid_len = None
 
-__C.lmbda = 0.1
+__C.lmbda = 1
 
 __C.pos_iou_thresh = 0.5
 __C.neg_iou_thresh = 0.2
