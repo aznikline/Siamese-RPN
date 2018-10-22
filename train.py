@@ -68,8 +68,8 @@ def parse_args():
                       help='resume checkpoint or not',
                       action='store_true')
     parser.add_argument('--f', dest='finetune',
-                      help='finetune or not',
-                      default=False, type=bool)
+                      help='finetune checkpoint or not',
+                      action='store_true')
     parser.add_argument('--load_name', dest='load_name',
                       help='path to the loading model',
                       type=str)
@@ -132,7 +132,6 @@ if __name__ == '__main__':
         cfg.grid_len = 20
     else:
         raise NameError('no such net!!')
-    model = model.cuda()
 
     params = []
     for param in model.parameters():
@@ -140,7 +139,7 @@ if __name__ == '__main__':
             params.append(param)
             
     # ------------------------------- get dataloaders
-    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,args.num_workers, args.batch_size)
+    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,cfg.anchor_scale,args.num_workers, args.batch_size)
 
     #--------------------------------- optimizer setup
     lr = args.lr
@@ -164,9 +163,20 @@ if __name__ == '__main__':
         print("loaded checkpoint {}".format(load_name))
         args.save_dir = args.load_name.split('/')[0]
     elif args.finetune:
-        raise NotImplementedError
+        load_name = output_dir / args.load_name
+        load_name = str(load_name)
+        print("loading checkpoint {}".format(load_name))
+        checkpoint = torch.load(load_name)
+        # args.session = checkpoint['session']
+        # args.start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['model'])
+        # optimizer.load_state_dict(checkpoint['optimizer'])
+        # lr = optimizer.param_groups[0]['lr']
+        print("loaded checkpoint {}".format(load_name))
+        args.save_dir = "_finetune_"+args.save_dir
     else:
         pass
+    model = model.cuda()
 
     #--------------------------------- logging part
     if not args.resume:
@@ -192,7 +202,8 @@ if __name__ == '__main__':
         for phase in ['train','validation']:
             if phase == 'train':
                 scheduler.step()
-                model.train()
+                # model.train()
+                model.eval()
                 logger = train_tb
             else:
                 model.eval()
@@ -229,15 +240,17 @@ if __name__ == '__main__':
                 loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
                 # loss, closs, rloss = Myloss()(coutput, clabel, routput, rlabel, cfg.lmbda)
 
+                epoch_loss += loss.data.item()
+                epoch_closs += closs.data.item()
+                epoch_rloss += rloss.data.item()
+
+                epoch_size += 1
+
+                # print(step,loss.data.item(),epoch_loss,epoch_size)
+
                 if phase == 'train':
                     loss.backward()
                     optimizer.step()
-
-                epoch_loss += loss.item()
-                epoch_closs += closs.item()
-                epoch_rloss += rloss.item()
-
-                epoch_size += 1
 
                 if args.use_tfboard and step % (args.disp_interval//5) == 0:
                     info = {
