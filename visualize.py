@@ -123,7 +123,7 @@ def outputConvertor(coutput, routput, anchor_shape):
             for c in range(5):
                 anchor = [cfg.grid_len//2+cfg.grid_len*a, cfg.grid_len//2+cfg.grid_len*b, anchor_shape[c][0], anchor_shape[c][1]]
                 anchor_x1y1x2y2 = xywh_to_x1y1x2y2(anchor)
-                anchor_x1y1x2y2 = clip_anchor(anchor_x1y1x2y2)
+                anchor_x1y1x2y2 = clip_anchor(anchor_x1y1x2y2,cfg.detection_size)
                 anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
                 delta = coutput[c,0,a,b]-coutput[c,1,a,b]
                 if delta > 10:

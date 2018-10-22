@@ -121,7 +121,7 @@ class MyDataset(Dataset):
                     for c in range(5):
                         anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
                         anchor = xywh_to_x1y1x2y2(anchor)
-                        anchor = clip_anchor(anchor)
+                        anchor = clip_anchor(anchor,cfg.detection_size)
                         iou = self._IOU(anchor, gtbox)
                         anchor = x1y1x2y2_to_xywh(anchor)
                         if iou >= cfg.pos_iou_thresh:
@@ -193,7 +193,7 @@ class MyDataset(Dataset):
                 for c in range(5):
                     anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
                     anchor = xywh_to_x1y1x2y2(anchor)
-                    anchor = clip_anchor(anchor)
+                    anchor = clip_anchor(anchor,cfg.detection_size)
                     iou = self._IOU(anchor, gtbox)
                     # if iou>0.3:
                         # print(x1y1x2y2_to_xywh(anchor), gtbox, iou)
