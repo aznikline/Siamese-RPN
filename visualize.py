@@ -247,6 +247,7 @@ if __name__ == '__main__':
                 img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255,0,0), idx-1)
 
         # cv2.imwrite("img.png", img[:,:,::-1])
+        img = cv2.resize(img,(128,128))
         imgs.append(img)
 
         closs = nn.CrossEntropyLoss()(coutput, clabel)
