@@ -14,7 +14,7 @@ from torchvision import transforms
 
 class MyDataset(Dataset):
 
-    def __init__(self, dataset_name, anchor_scale = 64, k = 5, phase='train'):
+    def __init__(self, dataset_name, anchor_scale, k = 5, phase='train'):
         self.anchor_shape = self._get_anchor_shape(anchor_scale)
         self.k = k
         self.grid_len = cfg.grid_len
@@ -251,13 +251,13 @@ class MyDataset(Dataset):
         area = w * h 
         return area / (sa + sb - area)
 
-def get_dataloader(dataset_name,num_workers=0, batch_size=1):
-    transformed_dataset_train = MyDataset(dataset_name=dataset_name,anchor_scale=cfg.anchor_scale)
-    transformed_dataset_validation = MyDataset(phase='validation',dataset_name=dataset_name, anchor_scale=cfg.anchor_scale)
-    transformed_dataset_test = MyDataset(phase='test',dataset_name=dataset_name, anchor_scale=cfg.anchor_scale)
-    train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+def get_dataloader(dataset_name, anchor_scale, num_workers=0, batch_size=1):
+    transformed_dataset_train = MyDataset(dataset_name=dataset_name,anchor_scale=anchor_scale)
+    transformed_dataset_validation = MyDataset(phase='validation',dataset_name=dataset_name, anchor_scale=anchor_scale)
+    transformed_dataset_test = MyDataset(phase='test',dataset_name=dataset_name, anchor_scale=anchor_scale)
+    train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     dataloader = {'train':train_dataloader, 'validation':validation_dataloader, 'test': test_dataloader}
     totsteps = {
         'train': len(transformed_dataset_train)//batch_size,

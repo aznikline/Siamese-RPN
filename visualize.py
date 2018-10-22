@@ -195,7 +195,7 @@ if __name__ == '__main__':
         param.requires_grad = False
 
     # ------------------------------- get dataloaders
-    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,args.num_workers, args.batch_size)
+    dataloader, totsteps, datasets = get_dataloader(args.dataset_name,cfg.anchor_scale,args.num_workers, args.batch_size)
 
     #--------------------------------- loading part
     load_name = output_dir / args.load_name
@@ -230,44 +230,48 @@ if __name__ == '__main__':
 
         # forward
         coutput, routput, ckernal, rkernal, conv1weight, template_features, cinput, detection_features = model(template, detection, debug=True)
+        # coutput, routput = model(template, detection)
 
         coutput, clabel = coutput.squeeze(), clabel.squeeze()
         coutput = coutput.view(5, 2, 17, 17)              # Batch*k*2*17*17
 
-        # for visualization
-        bboxList, maxProb = outputConvertor(coutput, routput, datasets[phase].anchor_shape)
-        img = imageConvertor(detection)
-        # print("img shape:", img.shape)
+        if step < 64:
+            # for visualization
+            bboxList, maxProb = outputConvertor(coutput, routput, datasets[phase].anchor_shape)
+            img = imageConvertor(detection)
+            # print("img shape:", img.shape)
 
-        print(len(bboxList), maxProb)
-        for idx,bbox in enumerate(reversed(bboxList)):
-            if idx < 2:
-                img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0,0,255), 1)
-            else:
-                img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255,0,0), idx-1)
+            print(len(bboxList), maxProb)
+            for idx,bbox in enumerate(reversed(bboxList)):
+                if idx < 2:
+                    img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0,0,255), 1)
+                else:
+                    img = cv2.rectangle(img.copy(), (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255,0,0), idx-1)
 
-        # cv2.imwrite("img.png", img[:,:,::-1])
-        img = cv2.resize(img,(128,128))
-        imgs.append(img)
+            # cv2.imwrite("img.png", img[:,:,::-1])
+            img = cv2.resize(img,(128,128))
+            imgs.append(img)
 
         closs = nn.CrossEntropyLoss()(coutput, clabel)
         rloss = SmoothL1Loss(use_gpu = True)(clabel, target, routput, rlabel)
         loss = Myloss()(coutput, clabel, target, routput, rlabel, cfg.lmbda)
 
-        epoch_loss += loss.item()
-        epoch_closs += closs.item()
-        epoch_rloss += rloss.item()
+        epoch_loss += loss.data.item()
+        epoch_closs += closs.data.item()
+        epoch_rloss += rloss.data.item()
 
         epoch_size += 1
+
+        # print(step,loss.data.item(),epoch_loss,epoch_size)
+
+        if step==63:
+            break
 
         # if step % args.disp_interval == 0:
         #     print("{} step:{} loss:{:.4g} closs:{:.4g} rloss:{:.4g}".format(
         #             phase, step,
         #             epoch_loss/epoch_size, epoch_closs/epoch_size, epoch_rloss/epoch_size,
         #         ))
-
-        if step==63:
-            break
 
     epoch_loss /= epoch_size
     epoch_closs /= epoch_size
