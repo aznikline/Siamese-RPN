@@ -77,8 +77,10 @@ class MyDataset(Dataset):
         idx = np.random.randint(0,len(labelList))
         label = labelList[idx]
         template = self.gallery[label]
-        gtbox = gtboxList[idx]
-        clabel, rlabel = self._get_label_multiflags(idx,gtboxList)
+        if len(labelList) == 1:
+            clabel, rlabel = self._get_label(gtboxList[idx])
+        else:
+            clabel, rlabel = self._get_label_multiflags(idx,gtboxList)
         return self.transforms(template), self.transforms(img), clabel, rlabel
 
     def resize_bbox(self, bbox, original_size):
