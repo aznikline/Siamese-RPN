@@ -239,6 +239,7 @@ if __name__ == '__main__':
             # for visualization
             bboxList, maxProb = outputConvertor(coutput, routput, datasets[phase].anchor_shape)
             img = imageConvertor(detection)
+            tplt = imageConvertor(template)
             # print("img shape:", img.shape)
 
             print(len(bboxList), maxProb)
@@ -250,6 +251,9 @@ if __name__ == '__main__':
 
             # cv2.imwrite("img.png", img[:,:,::-1])
             img = cv2.resize(img,(128,128))
+            tplt_size = 12
+            tplt = cv2.resize(tplt,(tplt_size,tplt_size))
+            img[:tplt_size,:tplt_size] = tplt
             imgs.append(img)
 
         closs = nn.CrossEntropyLoss()(coutput, clabel)
