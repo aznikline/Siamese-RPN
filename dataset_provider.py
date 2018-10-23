@@ -68,18 +68,19 @@ class MyDataset(Dataset):
         img = self.load_image(img_path)
         original_size = img.size
         img = img.resize((cfg.detection_size, cfg.detection_size), Image.BILINEAR)
-        bbox = info['bbox'][:]
-        self.resize_bbox(bbox, original_size)
-        gtbox = x1y1x2y2_to_xywh(bbox)
+        bboxList = info['bboxList'][:]
+        bboxList = list(map(lambda bbox: self.resize_bbox(bbox, original_size), bboxList))
+        gtboxList = list(map(lambda bbox: x1y1x2y2_to_xywh(bbox), bboxList))
 
-        label = info['label']
+        labelList = info['labelList']
+
+        idx = np.random.randint(0,len(labelList))
+        label = labelList[idx]
         template = self.gallery[label]
-
-        # if self.phase == 'train':
-        #     clabel, rlabel = self._gtbox_to_label(gtbox)
-        # else:
-        #     clabel, rlabel = self._get_test_label(gtbox)
-        clabel, rlabel = self._get_label(gtbox)
+        if len(labelList) == 1:
+            clabel, rlabel = self._get_label(gtboxList[idx])
+        else:
+            clabel, rlabel = self._get_label_multiflags(idx,gtboxList)
         return self.transforms(template), self.transforms(img), clabel, rlabel
 
     def resize_bbox(self, bbox, original_size):
@@ -87,6 +88,7 @@ class MyDataset(Dataset):
         bbox[2] *= cfg.detection_size/original_size[0]
         bbox[1] *= cfg.detection_size/original_size[1]
         bbox[3] *= cfg.detection_size/original_size[1]
+        return bbox
     
     '''数据转换，包括裁剪、变形、转换为tensor、归一化
     '''
@@ -99,6 +101,43 @@ class MyDataset(Dataset):
         
     """根据ground truth box构造class label和reg label
     """
+    def _get_label_multiflags(self, idx, gtboxList):
+        clabel = np.zeros([5, 17, 17]) - 100
+        rlabel = np.zeros([20, 17, 17], dtype = np.float32)
+        gtbox = gtboxList[idx]
+        if self.phase in ['train','validation']:
+            pos, neg = self._get_64_anchors_multiflags(idx,gtboxList)
+            assert len(pos)+len(neg)==64
+            for a,b,c,anchor_x1y1x2y2 in pos:
+                anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
+                clabel[c,a,b] = 1
+                channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                channel2 = math.log(gtbox[2]/anchor[2])
+                channel3 = math.log(gtbox[3]/anchor[3])
+                rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+            for a,b,c,anchor in neg:
+                clabel[c,a,b] = 0
+        else :
+            for a in range(17):
+                for b in range(17):
+                    for c in range(5):
+                        anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                        anchor_x1y1x2y2 = xywh_to_x1y1x2y2(anchor)
+                        anchor_x1y1x2y2 = clip_anchor(anchor_x1y1x2y2,cfg.detection_size)
+                        iou = self._IOU(anchor_x1y1x2y2, gtbox)
+                        anchor = x1y1x2y2_to_xywh(anchor_x1y1x2y2)
+                        if iou>cfg.pos_iou_thresh:
+                            clabel[c,a,b] = 1
+                            channel0 = (gtbox[0] - anchor[0])/anchor[2]
+                            channel1 = (gtbox[1] - anchor[1])/anchor[3]
+                            channel2 = math.log(gtbox[2]/anchor[2])
+                            channel3 = math.log(gtbox[3]/anchor[3])
+                            rlabel[c*4:c*4+4,a,b] = [channel0, channel1, channel2, channel3]
+                        elif iou<=cfg.neg_iou_thresh:
+                            clabel[c,a,b] = 0
+        return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
+
     def _get_label(self, gtbox):
         clabel = np.zeros([5, 17, 17]) - 100
         rlabel = np.zeros([20, 17, 17], dtype = np.float32)
@@ -184,6 +223,42 @@ class MyDataset(Dataset):
     #                         clabel[c,a,b] = 1
     #     return torch.Tensor(clabel).long(), torch.Tensor(rlabel).float()
 
+    def _get_64_anchors_multiflags(self,idx,gtboxList):
+        pos = {}
+        neg = {}
+        zero = {}
+        brother = {}
+        for a in range(17):
+            for b in range(17):
+                for c in range(5):
+                    anchor = [self.grid_len//2+self.grid_len*a, self.grid_len//2+self.grid_len*b, self.anchor_shape[c][0], self.anchor_shape[c][1]]
+                    anchor_x1y1x2y2 = xywh_to_x1y1x2y2(anchor)
+                    anchor_x1y1x2y2 = clip_anchor(anchor_x1y1x2y2,cfg.detection_size)
+                    iouList = list(map(lambda gtbox_xywh: self._IOU(anchor_x1y1x2y2, gtbox_xywh) , gtboxList))
+                    if iouList[idx]>cfg.pos_iou_thresh:
+                        pos[(a,b,c)] = (iou,anchor_x1y1x2y2)
+                    else:
+                        iou = max(iouList[:idx]+iouList[idx+1:])
+                        if iou > cfg.pos_iou_thresh:
+                            brother[(a,b,c)] = (iou,anchor_x1y1x2y2)
+                        iou = max(iou, iouList[idx])
+                        if iou <= cfg.neg_iou_thresh and iou > 0:
+                            neg[(a,b,c)] = (iou, anchor_x1y1x2y2)
+                        elif iou == 0:
+                            zero[(a,b,c)] = (iou, anchor_x1y1x2y2)
+        pos = sorted(pos.items(), key=lambda tup: tup[1][0], reverse=True)
+        pos = [(*tup[0], tup[1][1]) for tup in pos[:16]]  # list of (a,b,c,anchor_x1y1x2y2)
+        brother = sorted(brother.items(), key=lambda tup: tup[1][0], reverse=True)
+        brother = [(*tup[0], tup[1][1]) for tup in brother[:16]]
+        num = math.ceil((64-len(pos)-len(brother))/2)
+        zero = list(zero.items())
+        np.random.shuffle(zero)
+        zero = [(*tup[0], tup[1][1]) for tup in zero[:num]]
+        neg = sorted(neg.items(), key=lambda tup: tup[1][0], reverse=True)
+        neg = [(*tup[0], tup[1][1]) for tup in neg[:64-len(pos)-len(brother)-len(zero)]]
+        neg += brother + zero
+        return pos, neg
+
     def _get_64_anchors_new(self, gtbox):
         pos = {}
         neg = {}
@@ -255,9 +330,9 @@ def get_dataloader(dataset_name, anchor_scale, num_workers=0, batch_size=1):
     transformed_dataset_train = MyDataset(dataset_name=dataset_name,anchor_scale=anchor_scale)
     transformed_dataset_validation = MyDataset(phase='validation',dataset_name=dataset_name, anchor_scale=anchor_scale)
     transformed_dataset_test = MyDataset(phase='test',dataset_name=dataset_name, anchor_scale=anchor_scale)
-    train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    train_dataloader = DataLoader(transformed_dataset_train, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    validation_dataloader = DataLoader(transformed_dataset_validation, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    test_dataloader = DataLoader(transformed_dataset_test, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     dataloader = {'train':train_dataloader, 'validation':validation_dataloader, 'test': test_dataloader}
     totsteps = {
         'train': len(transformed_dataset_train)//batch_size,
@@ -280,13 +355,14 @@ if __name__ == '__main__':
 
     if args.build:
         builder = FlagBuilder(cfg.PATH.root_dir)
-        iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
+        # iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
+        iter_img_paths = list(cfg.PATH.source_imgs_dir.glob('*.jpg'))
         # builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
         #                             scaleRange=None)
         # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
         # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
-        builder.build("3loop_for_resnet", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
-                scaleRange=None, iter_loop=3)
+        builder.build("3loop_3flags", iter_img_paths, num_flags=3, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+                scaleRange=[0.2,0.25], iter_loop=3)
 
     if args.testds:
         cfg.anchor_scale = 85
