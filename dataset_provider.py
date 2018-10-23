@@ -280,12 +280,13 @@ if __name__ == '__main__':
 
     if args.build:
         builder = FlagBuilder(cfg.PATH.root_dir)
-        iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
+        # iter_img_paths = cfg.PATH.source_imgs_dir.glob('*.jpg')
+        iter_img_paths = list(cfg.PATH.source_imgs_dir.glob('*.jpg'))[:100]
         # builder.build_train_dataset("64scale_train_dataset", iter_img_paths, num_train_classes=100, num_test_classes=100, 
         #                             scaleRange=None)
         # builder.build_test_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
         # builder.build_val_dataset("64scale_train_dataset", iter_img_paths, scaleRange=None)
-        builder.build("3loop_for_resnet", iter_img_paths, exist_ok=False, num_train_classes=100, num_test_classes=100, 
+        builder.build("3loop_3flags", iter_img_paths, num_flags=3, exist_ok=False, num_train_classes=100, num_test_classes=100, 
                 scaleRange=None, iter_loop=3)
 
     if args.testds:
