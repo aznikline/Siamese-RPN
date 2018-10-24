@@ -185,7 +185,7 @@ if __name__ == '__main__':
     if not args.resume:
         pseudoStr = "_pseudo" if args.pseudo else ""
         args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}{}_{}{}_{}{}-{}-{}_{}{}_{}{}_{}{}".format(
-                args.net, pseudoStr
+                args.net, pseudoStr,
                 'opt', args.optimizer,
                 'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
                 'ses',args.session,
