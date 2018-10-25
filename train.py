@@ -140,6 +140,7 @@ if __name__ == '__main__':
     for param in model.parameters():
         if param.requires_grad:
             params.append(param)
+    model = model.cuda()
             
     # ------------------------------- get dataloaders
     dataloader, totsteps, datasets = get_dataloader(args.dataset_name,cfg.anchor_scale,args.num_workers, args.batch_size)
@@ -150,7 +151,6 @@ if __name__ == '__main__':
         optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=args.weight_decay)
     elif args.optimizer == 'sgd':
         optimizer = optim.SGD(params, lr=lr, momentum=cfg.TRAIN.momentum, weight_decay=args.weight_decay)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- loading part
     if args.resume:
@@ -179,7 +179,7 @@ if __name__ == '__main__':
         args.save_dir = "_finetune_"+args.save_dir
     else:
         pass
-    model = model.cuda()
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- logging part
     if not args.resume:
