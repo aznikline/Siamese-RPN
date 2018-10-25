@@ -96,6 +96,9 @@ def parse_args():
     parser.add_argument('--ds', dest='dataset_name',
                       help='name of dataset',
                       required=True, type=str)
+    parser.add_argument('--pseudo', dest='pseudo',
+                      help='whether use pseudo siamese network',
+                      action='store_true')
 
     #--------------------
     parser.add_argument('--phase', dest='phase',
@@ -173,7 +176,7 @@ if __name__ == '__main__':
     #-------------------------------- get model here
     if args.net=='alexnet':
         from siamrpn.alexnet import alexnet
-        model = alexnet()
+        model = alexnet(pseudo=args.pseudo)
         cfg.anchor_scale = 64
         cfg.template_size = 127
         cfg.detection_size = 255
@@ -182,7 +185,7 @@ if __name__ == '__main__':
         assert args.net in ['resnet18','resnet34','resnet50','resnet101','resnet152'], 'check net input!'
         from siamrpn.resnet import resnet
         num_layers = int(args.net[6:])
-        model = resnet(num_layers)
+        model = resnet(num_layers,pseudo=args.pseudo)
         cfg.anchor_scale = 85
         cfg.template_size = 96
         cfg.detection_size = 340

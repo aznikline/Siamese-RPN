@@ -92,6 +92,9 @@ def parse_args():
     parser.add_argument('--ds', dest='dataset_name',
                       help='name of dataset',
                       required=True, type=str)
+    parser.add_argument('--pseudo', dest='pseudo',
+                      help='whether use pseudo siamese network',
+                      action='store_true')
 
     args = parser.parse_args()
     return args
@@ -116,7 +119,7 @@ if __name__ == '__main__':
     #-------------------------------- get model here
     if args.net=='alexnet':
         from siamrpn.alexnet import alexnet
-        model = alexnet()
+        model = alexnet(pseudo=args.pseudo)
         cfg.anchor_scale = 64
         cfg.template_size = 127
         cfg.detection_size = 255
@@ -125,7 +128,7 @@ if __name__ == '__main__':
         assert args.net in ['resnet18','resnet34','resnet50','resnet101','resnet152'], 'check net input!'
         from siamrpn.resnet import resnet
         num_layers = int(args.net[6:])
-        model = resnet(num_layers)
+        model = resnet(num_layers,pseudo=args.pseudo)
         cfg.anchor_scale = 85
         cfg.template_size = 96
         cfg.detection_size = 340
@@ -137,6 +140,7 @@ if __name__ == '__main__':
     for param in model.parameters():
         if param.requires_grad:
             params.append(param)
+    model = model.cuda()
             
     # ------------------------------- get dataloaders
     dataloader, totsteps, datasets = get_dataloader(args.dataset_name,cfg.anchor_scale,args.num_workers, args.batch_size)
@@ -147,7 +151,6 @@ if __name__ == '__main__':
         optimizer = optim.Adam(params, lr=lr, eps=1e-8, weight_decay=args.weight_decay)
     elif args.optimizer == 'sgd':
         optimizer = optim.SGD(params, lr=lr, momentum=cfg.TRAIN.momentum, weight_decay=args.weight_decay)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- loading part
     if args.resume:
@@ -176,12 +179,13 @@ if __name__ == '__main__':
         args.save_dir = "_finetune_"+args.save_dir
     else:
         pass
-    model = model.cuda()
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_gamma)
 
     #--------------------------------- logging part
     if not args.resume:
-        args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}_{}{}_{}{}-{}-{}_{}{}_{}{}_{}{}".format(
-                args.net, 
+        pseudoStr = "_pseudo" if args.pseudo else ""
+        args.save_dir = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + args.save_dir + "{}{}_{}{}_{}{}-{}-{}_{}{}_{}{}_{}{}".format(
+                args.net, pseudoStr,
                 'opt', args.optimizer,
                 'lr', args.lr,args.lr_decay_step,args.lr_decay_gamma,
                 'ses',args.session,
